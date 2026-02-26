@@ -1,0 +1,22 @@
+        Ticker,
+        Purchase_Date,
+        Units,
+        Purchase_Price,
+        Brokerage,
+        Sold_Units  
+        Purchase_Value,
+        Live_Price,
+        Live_Value,
+        Capital_Gain_Value,
+        Capital_Gain_Percent,
+        Remain_Balance,
+        FIFO_CG,  
+
+
+
+
+        INSERT INTO ETF (
+            Ticker, Purchase_Date, Units, Purchase_Price, Brokerage, 
+            Sold_Units, Purchase_Value, Live_Price, Live_Value, 
+            Capital_Gain_Value, Capital_Gain_Percent, Remain_Balance, FIFO_CG
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)

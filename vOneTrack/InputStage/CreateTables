@@ -1,0 +1,40 @@
+import os
+import sqlite3
+
+# 1. Connect to the database file
+# In SQLite, the file acts as the 'Schema'
+db_path = "/Users/nawinprabhujayaraman/Nawin/projects/OneTrack/vOneTrack/InputStage/onetrack.db"
+conn = sqlite3.connect(db_path)
+cursor = conn.cursor()
+
+# 2. Create the 'Investment' table
+# We use underscores instead of spaces for column names to prevent SQL errors
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS Investment (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        Ticker TEXT NOT NULL,
+        Purchase_Date DATE NOT NULL,
+        Units INTEGER NOT NULL,
+        Purchase_Price REAL NOT NULL,
+        Brokerage REAL NOT NULL,
+        Sold_Units INTEGER NOT NULL,
+        Purchase_Value REAL NOT NULL,
+        Live_Price REAL NOT NULL,
+        Live_Value REAL NOT NULL,
+        Capital_Gain_Value REAL NOT NULL,
+        Capital_Gain_Percent REAL NOT NULL,
+        Remain_Balance INTEGER NOT NULL,
+        FIFO_CG INTEGER,  
+        Currency TEXT,
+        Country TEXT,
+        Account_Platform TEXT,
+        Created_At TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        
+    )
+''')
+
+# 3. Commit and close
+conn.commit()
+conn.close()
+
+print("Database 'onetrack.db' ready. Table 'Investment' created successfully.")
