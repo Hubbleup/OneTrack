@@ -20,3 +20,29 @@
             Sold_Units, Purchase_Value, Live_Price, Live_Value, 
             Capital_Gain_Value, Capital_Gain_Percent, Remain_Balance, FIFO_CG
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+
+
+        # 1. Open the database
+sqlite3 /Users/nawinprabhujayaraman/Nawin/projects/OneTrack/vOneTrack/InputStage/onetrack.db
+
+# 2. Inside the sqlite prompt, run:
+DROP TABLE IF EXISTS ETF;
+.tables
+.exit
+
+Purchase_Date, Units, Purchase_Price, Brokerage, 
+            Sold_Units, Purchase_Value, Live_Price, Live_Value, 
+            Capital_Gain_Value, Capital_Gain_Percent, Remain_Balance, FIFO_CG,
+UPDATE investment
+SET 
+    "Purchase_Price" = REPLACE("Purchase_Price", '$', ''),
+    "Brokerage" = REPLACE("Brokerage", '$', ''),
+    "Purchase_Value" = REPLACE("Purchase_Value", '$', ''),
+    "Live_Value" = REPLACE("Live_Value", '$', ''),
+    "Capital_Gain_Value" = REPLACE("Capital_Gain_Value", '$', '');
+
+
+
+
+'AMD.AX', 'PMGOLD.AX']: possibly delisted; no price data found  (period=1d)
+['NYSE:KO.AX', 'SPXL.AX', '0P0000XVU2.BO.AX', '0P00009J3J.BO.AX', '0P0000PTGR.BO.AX', 'NVDA.AX', 'SHOP.AX', 'VOO.AX', '0P0001DI4I.BO.AX', '0P0000KV36.BO.AX'
