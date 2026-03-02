@@ -1,0 +1,111 @@
+import sqlite3
+import os
+import pandas as pd
+import plotly.express as px
+from datetime import datetime
+import sys
+
+class DividendVisualizer:
+    def __init__(self, db_path):
+        self.db_path = os.path.abspath(db_path)
+        if not os.path.exists(self.db_path):
+            raise FileNotFoundError(f"Database not found at {self.db_path}")
+
+    def _get_connection(self):
+        return sqlite3.connect(self.db_path)
+
+    def get_time_logic(self, choice: str):
+        """Maps frequency code to SQL grouping logic."""
+        if choice == 'Y':
+            return "strftime('%Y', payment_date)", "Yearly"
+        elif choice == 'H':
+            return ("strftime('%Y', payment_date) || '-H' || "
+                    "(CASE WHEN strftime('%m', payment_date) <= '06' THEN '1' ELSE '2' END)"), "Half-Yearly"
+        else:
+            return ("strftime('%Y', payment_date) || '-Q' || "
+                    "((strftime('%m', payment_date) - 1) / 3 + 1)"), "Quarterly"
+
+    def parse_input(self, user_input):
+        """Extracts tickers and frequency from a single input string."""
+        parts = user_input.strip().split()
+        if not parts:
+            return None, 'Q'
+        
+        # Check if the last word is a frequency code
+        last_word = parts[-1].upper()
+        if last_word in ['Q', 'H', 'Y']:
+            freq = last_word
+            tickers = " ".join(parts[:-1]).replace(',', ' ') # Remove frequency from ticker list
+        else:
+            freq = 'Q' # Default
+            tickers = " ".join(parts).replace(',', ' ')
+            
+        return tickers.strip() if tickers else None, freq
+
+    def fetch_data(self, group_sql, tickers=None):
+        where_clause = f"WHERE payment_date <= '{datetime.now().strftime('%Y-%m-%d')}'"
+        
+        if tickers:
+            ticker_list = [t.strip().upper() for t in tickers.split() if t.strip()]
+            ticker_str = "','".join(ticker_list)
+            where_clause += f" AND Ticker IN ('{ticker_str}')"
+
+        query = f"""
+        SELECT 
+            ticker AS Ticker,
+            {group_sql} AS Period,
+            SUM(total_dividend) AS Earnings
+        FROM Dividends
+        {where_clause}
+        GROUP BY Ticker, Period
+        ORDER BY payment_date ASC;
+        """
+        with self._get_connection() as conn:
+            return pd.read_sql_query(query, conn)
+
+    def run_dashboard(self):
+        print(f"\n📊 Database: {self.db_path}")
+        print("Usage examples: 'AAPL, MSFT H', 'TSLA', 'Q' (for all)")
+        
+        user_raw = input("Enter Tickers and/or Frequency: ").strip()
+        ticker_list, freq_code = self.parse_input(user_raw)
+        group_sql, label = self.get_time_logic(freq_code)
+
+        df = self.fetch_data(group_sql, ticker_list)
+
+        if df.empty:
+            print(f"⚠️ No records found for your input.")
+            return
+
+        # Prepare Titles
+        filter_text = f" [Filter: {ticker_list}]" if ticker_list else " [Full Portfolio]"
+        
+        # Visual 1: Line Graph
+        fig_line = px.line(
+            df, x='Period', y='Earnings', color='Ticker', markers=True,
+            title=f"Dividend Trends {filter_text} - {label} View",
+            labels={'Earnings': 'Dividends ($)', 'Period': 'Time'},
+            template="plotly_white"
+        )
+        
+        # Visual 2: Bar Chart
+        total_df = df.groupby('Period')['Earnings'].sum().reset_index()
+        fig_bar = px.bar(
+            total_df, x='Period', y='Earnings',
+            title=f"Total Earnings {filter_text} - {label} View",
+            text_auto='.2f', color_discrete_sequence=['#2ecc71'],
+            template="plotly_dark"
+        )
+
+        fig_line.show()
+        fig_bar.show()
+
+if __name__ == "__main__":
+    DEFAULT_DB = "/Users/nawinprabhujayaraman/Nawin/projects/OneTrack/vOneTrack/InputStage/onetrack.db"
+    DB_PATH = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DB
+
+    try:
+        viz = DividendVisualizer(DB_PATH)
+        viz.run_dashboard()
+    except Exception as e:
+        print(f"❌ Error: {e}")
