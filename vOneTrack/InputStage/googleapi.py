@@ -180,3 +180,4 @@ if __name__ == '__main__':
         print(f"No messages found from {args.sender}")
     for m in messages:
         print('Snippet:', m.get('snippet'))
+    

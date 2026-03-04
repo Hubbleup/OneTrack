@@ -62,7 +62,22 @@ class DividendVisualizer:
         """
         with self._get_connection() as conn:
             return pd.read_sql_query(query, conn)
-
+        
+    def fetch_recent_payments(self, limit=5):
+            """Fetches the N most recent dividend payments from the database."""
+            query = f"""
+            SELECT 
+                ticker AS Ticker, 
+                payment_date AS 'Pay Date', 
+                num_shares AS Shares, 
+                dividend_per_unit AS 'Per Share', 
+                total_dividend AS Total
+            FROM Dividends
+            ORDER BY payment_date DESC
+            LIMIT {limit};
+            """
+            with self._get_connection() as conn:
+                return pd.read_sql_query(query, conn)
 # --- STREAMLIT UI ---
 st.set_page_config(page_title="Dividend Tracker", layout="wide")
 st.title("📅 Dividend Income Analytics")
@@ -113,3 +128,19 @@ if st.button("📊 Generate Charts"):
             
         with tab3:
             st.dataframe(df, use_container_width=True)
+st.divider()
+st.subheader("🗓️ Recent Dividend Payments")
+
+# Fetch the last 5 payments
+recent_df = viz.fetch_recent_payments(limit=5)
+
+if not recent_df.empty:
+    # Display as a clean table
+    st.table(recent_df.style.format({
+        'Per Share': '${:.4f}',
+        'Total': '${:.2f}'
+    }))
+else:
+    st.info("No recent payments found in the database.")
+
+
