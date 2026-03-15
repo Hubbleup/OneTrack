@@ -1,7 +1,8 @@
 import sqlite3
 import yfinance as yf
 import os
-import pandas as pd  # Often needed by yfinance under the hood
+import pandas as pd
+import streamlit as st
 
 class PortfolioUpdater:
     def __init__(self, db_path):
@@ -13,7 +14,6 @@ class PortfolioUpdater:
         return sqlite3.connect(self.db_path)
 
     def refresh_live_prices(self):
-        """Fetches latest prices with exchange-specific suffixes and updates DB."""
         conn = self._get_connection()
         cursor = conn.cursor()
 
@@ -22,24 +22,24 @@ class PortfolioUpdater:
         db_rows = cursor.fetchall()
 
         if not db_rows:
-            print("⚠️ No tickers found in the database.")
             conn.close()
             return
 
-        # 2. Map original tickers to Yahoo Symbols
+        # 2. Map original tickers to Yahoo Symbols (Handles IND, AUS, USA)
         ticker_map = {}
         for ticker, country, currency in db_rows:
             if not ticker: continue
-            yahoo_symbol = f"{ticker}.AX" if country == "AUS" and currency == "AUD" else ticker
-            ticker_map[yahoo_symbol] = ticker
+            if country == "AUS": symbol = f"{ticker}.AX"
+            elif country == "IND": symbol = f"{ticker}.NS" # Added India Suffix
+            else: symbol = ticker # USA usually needs no suffix
+            ticker_map[symbol] = ticker
 
-        yahoo_symbols = list(ticker_map.keys())
-        print(f"🔄 Syncing prices for: {', '.join(yahoo_symbols)}")
-
-        # 3. Download data (using 5d to ensure we have a fallback if today is empty)
+        symbols = list(ticker_map.keys())
+        
+        # 3. Download data
         try:
-            # We use 5d/1d to get enough history to find the 'last valid' price
-            data = yf.download(yahoo_symbols, period="5d", interval="1d", group_by='ticker', progress=False)
+            # We fetch 5d to ensure we don't get an empty 'today' on weekends
+            data = yf.download(symbols, period="5d", interval="1d", progress=False)
         except Exception as e:
             print(f"❌ Yahoo Finance Error: {e}")
             conn.close()
@@ -49,47 +49,44 @@ class PortfolioUpdater:
 
         for yahoo_symbol, original_ticker in ticker_map.items():
             try:
-                # Select the 'Close' column for the specific ticker
-                if len(yahoo_symbols) == 1:
-                    ticker_series = data['Close']
+                # Handle MultiIndex vs Single Index columns safely
+                if len(symbols) > 1:
+                    ticker_series = data['Close'][yahoo_symbol]
                 else:
-                    ticker_series = data[yahoo_symbol]['Close']
+                    ticker_series = data['Close']
 
-                # --- FALLBACK LOGIC ---
-                # .ffill() moves the last valid price forward into NaN spots
-                # .iloc[-1] then grabs the very last value (today's or the most recent fallback)
                 current_price = ticker_series.ffill().iloc[-1]
 
                 if pd.isna(current_price) or current_price == 0:
-                    print(f"⚠️ Skipping {original_ticker}: No price data found in last 5 days.")
                     continue
 
-                # 4. Update the DB
+                # 4. Update the DB (Ensuring column names match your Net Worth logic)
                 cursor.execute("""
                     UPDATE Investment 
                     SET Live_Price = ?, 
-                        Live_Value = ? * Remain_Balance,
-                        Capital_Gain_Value = (? * Remain_Balance) - Purchase_Value,
-                        Capital_Gain_Percent = CASE 
-                            WHEN Purchase_Value > 0 THEN ((? * Remain_Balance - Purchase_Value) * 100.0 / Purchase_Value)
-                            ELSE 0
-                        END
+                        Live_Value = ? * Units,
+                        Capital_Gain_Value = (? * Units) - Purchase_Value
                     WHERE Ticker = ?
-                """, (current_price, current_price, current_price, current_price, original_ticker))
+                """, (current_price, current_price, current_price, original_ticker))
                 
                 updates_count += 1
-                print(f"✅ {original_ticker.ljust(10)} | Price: ${current_price:,.2f}")
-
             except Exception as e:
-                print(f"⚠️ Could not update {original_ticker}: {e}")
+                print(f"⚠️ Error on {original_ticker}: {e}")
 
         conn.commit()
         conn.close()
-        print(f"\n🚀 Success: Updated {updates_count} assets.")
 
-# --- Example Usage ---
-if __name__ == "__main__":
-    DB_FILE = "/Users/nawinprabhujayaraman/Nawin/projects/OneTrack/vOneTrack/InputStage/onetrack.db"
-    updater = PortfolioUpdater(DB_FILE)
-    updater.refresh_live_prices()
-    
+    def get_live_exchange_rates(self):
+        """Fetches dynamic rates. Logic updated to work with or without Streamlit."""
+        try:
+            # Using history() is often more reliable than .info
+            usd = yf.Ticker("USDAUD=X").history(period="1d")['Close'].iloc[-1]
+            inr = yf.Ticker("INRAUD=X").history(period="1d")['Close'].iloc[-1]
+            
+            return {'AUS': 1.0, 'IND': inr, 'USA': usd}
+        except Exception as e:
+            # Only use st.warning if we are actually in a streamlit app
+            msg = f"Using fallback exchange rates: {e}"
+            try: st.warning(msg)
+            except: print(msg)
+            return {'AUS': 1.0, 'IND': 0.0154, 'USA': 1.42}
