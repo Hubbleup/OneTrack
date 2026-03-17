@@ -4,3 +4,14 @@ Pie chart for ETF, GOLD and Stock
 investment graph - no of items brought and value of stocks bough each month the graph must be viewable in monthly, bi annual, auaterly and annually
 
 
+From - 
+Sample Subject - Order filled: BUY 6 IVV at 68.000 AUD - Account: 818836
+values available in Subject - Order filled: BUY "No of units" "Ticker symbol" at "Purchase Purchase_Price" "Currency" - Account: "Account number"
+
+when email with subject is founf from sender then read the TIcker Symbol, Based on currency populate country, populate purchase price , No of units purchased is available
+
+If i clear the table of investments can you popluate all the buys from ID1 and ID2  using the exising code 
+33
+
+
+"AsxCode	"Settlement Date"	"Avg Price"	"Price"	"Quantity"	"Consideration"

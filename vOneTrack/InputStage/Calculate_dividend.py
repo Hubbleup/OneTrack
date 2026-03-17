@@ -191,6 +191,43 @@ class DividendCalculator:
             results[ticker] = count
         return results
 
+    def sync_new_dividends_from_db(self) -> Dict[str, int]:
+        results = {}
+        # 1. Get all holdings from Investment table
+        holdings = self._query("SELECT id, Ticker, Units, Country, Purchase_Date FROM Investment")
+        
+        for h_id, ticker, units, country, p_date in holdings:
+            # 2. Find the last dividend date we have for this specific investment
+            last_record = self._query(
+                "SELECT MAX(payment_date) FROM Dividends WHERE investment_id = ?", (h_id,)
+            )
+            
+            # Start searching from the later of: Purchase Date OR Last Recorded Dividend
+            last_date = last_record[0][0]
+            search_start = last_date if last_date else p_date
+            
+            # 3. Fetch from Yahoo Finance
+            history = self.fetch_dividend_history(ticker, search_start, country)
+            
+            count = 0
+            for div in history:
+                # 4. Only Insert if the date is strictly NEWER than our last record
+                if not last_date or div['payment_date'] > last_date:
+                    if self.store_dividend(
+                        ticker=ticker, 
+                        payment_date=div['payment_date'], 
+                        num_shares=units, 
+                        dividend_per_unit=div['dividend_per_unit'], 
+                        investment_id=h_id
+                    ):
+                        count += 1
+            
+            if count > 0:
+                results[ticker] = count
+                
+        return results
+
+
 # --- EXECUTION ---
 if __name__ == '__main__':
     import sys

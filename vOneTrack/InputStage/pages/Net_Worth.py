@@ -112,7 +112,14 @@ def show_ticker_growth_chart(df):
     
     # Since df is aggregated, iloc[0] now correctly represents the ticker's combined data
     ticker_row = df[df['Ticker'] == selected_ticker].iloc[0]
-    purchase_date_str = ticker_row['Purchase_Date']
+    # 2. Extract and Convert the date to YYYY-MM-DD
+    raw_date = ticker_row['Purchase_Date']
+    try:
+        # dayfirst=True tells Pandas your format is dd/MM/YYYY
+        purchase_date_str = pd.to_datetime(raw_date, dayfirst=True).strftime('%Y-%m-%d')
+    except Exception:
+        # Fallback if the date is already in the correct format or is 'None'
+        purchase_date_str = raw_date 
     
     try:
         country = ticker_row['Country']
