@@ -30,7 +30,7 @@ class PortfolioUpdater:
         for ticker, country, currency in db_rows:
             if not ticker: continue
             if country == "AUS": symbol = f"{ticker}.AX"
-            elif country == "IND": symbol = f"{ticker}.NS" # Added India Suffix
+            elif country == "IND": symbol = f"{ticker}.BO" # Added India Suffix
             else: symbol = ticker # USA usually needs no suffix
             ticker_map[symbol] = ticker
 
@@ -90,3 +90,18 @@ class PortfolioUpdater:
             try: st.warning(msg)
             except: print(msg)
             return {'AUS': 1.0, 'IND': 0.0154, 'USA': 1.42}
+        
+    def run_continuous_sync(self, interval_seconds=300):
+        """Runs the price refresh in a loop every X seconds."""
+        while True:
+            try:
+                print(f"🔄 Background Sync Started at {time.strftime('%H:%M:%S')}")
+                self.refresh_live_prices()
+                # Also sync your AUD rates here if needed
+
+                with open("last_sync.txt", "w") as f:
+                    f.write(time.strftime("%H:%M:%S"))
+                time.sleep(interval_seconds)
+            except Exception as e:
+                print(f"❌ Background Sync Error: {e}")
+                time.sleep(60) # Wait a bit before retrying if it fails

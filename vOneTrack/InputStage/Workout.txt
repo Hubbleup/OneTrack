@@ -15,3 +15,93 @@ If i clear the table of investments can you popluate all the buys from ID1 and I
 
 
 "AsxCode	"Settlement Date"	"Avg Price"	"Price"	"Quantity"	"Consideration"
+
+
+Is Detailed portfolio table in networth doing this, If not must change like this 
+
+ex- I have a stock SHOP from US market - I have bought them at different times 
+
+Purchase Date	Volume	Order Price (AUD)*	Brokerage	Sold Units	Order Value	Live Price	Live Value	Capital Gain ($)	Capital Gain (%)
+13/05/2024	    12	    $57.41	            $0.00	        0	    $688.92	    127.8	    $1,533.60	$844.68	            122.61%
+25/06/2024	    10	    $65.00	            $0.00	        0	    $650.00	    127.8	    $1,278.00	$628.00	            96.62%
+01/11/2025	    3	    $172.94 	        $0.00	        0	    $518.82	    127.8	    $383.40	    -$135.42	        -26.10%
+
+all these are collective must be displayed in the detailed portfolio table like this
+Live Price (AUD)	180D History		Held Units	Total Live Value ($)	Total Return ($)	Total Return (%)
+$127.80		                            25	        $3,195.00	            $1,337.26	        71.98%
+
+Total value is calculated using units * Total live value 
+Total return is calculated using summing the capital gains of stock 'SHOP' purchased at differetnt time ( $844.68 + $628.00 +-$135.42) = $1,337.26
+Total return Percentage is calcuted by taking Shop's total return divided by sumproduct of SHop's order price and it remain balance or units 
+
+
+"Units": st.column_config.NumberColumn("Held Units", help="Total number of shares/units held", format="%.2f",),
+
+ VEU
+VAS,
+VTS
+ SEMI
+ IVV
+ SPY
+SPXL
+VOO
+PMGOLD
+GOLD
+
+/Users/nawinprabhujayaraman/Nawin/projects/OneTrack/vOneTrack/InputStage/pages/Utils.py
+/Users/nawinprabhujayaraman/Nawin/projects/OneTrack/vOneTrack/InputStage/pages/3Net_Worth.py
+Ticker	Purchase_Date	Units	Purchase_Price	Brokerage	Sold_Units	Purchase_Value	Live_Price	Live_Value	Capital_Gain_Value	Capital_Gain_Percent	Remain_Balance	FIFO_CG	Account_Platform	Currency	Country	Investment_Type	Created_At	Dividend_Yield	Annual_Dividend	Last_Ex_Date
+WES	2024-08-07	14	71.04	0	0	994.56	73.8399963378906	1033.75994873047	39.1999487304688	3.94143628644514	14		CMC	AUD	AUS	Stocks	2026-02-26 03:08:29	281	2.13	1771891200
+
+
+bring some data from investment backup to investment table , based on ticker ( for ex FOR NAB and SUN ) tickers bring all the columns values from Investment backup to investment 
+
+Investemtn column name 
+
+id
+Ticker
+Purchase_Date
+Units
+Purchase_Price
+Brokerage
+Sold_Units
+Purchase_Value
+Live_Price
+Live_Value
+Capital_Gain_Value
+Capital_Gain_Percent
+Remain_Balance
+FIFO_CG
+Account_Platform
+Currency
+Country
+Investment_Type
+Created_At
+Dividend_Yield
+Annual_Dividend
+Last_Ex_Date
+
+Investment backup table column names
+
+id
+Ticker
+Purchase_Date
+Units
+Purchase_Price
+Brokerage
+Sold_Units
+Purchase_Value
+Live_Price
+Live_Value
+Capital_Gain_Value
+Capital_Gain_Percent
+Remain_Balance
+FIFO_CG
+Account_Platform
+Currency
+Country
+Investment_Type
+Created_At
+Dividend_Yield
+Annual_Dividend
+Last_Ex_Date

@@ -3,18 +3,28 @@ import sqlite3
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
+import os
+import sys
 
-# --- CONFIGURATION ---
+# --- 1. PATH SETUP ---
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+
+from utils import show_sync_status
+from Portfolio_updater import PortfolioUpdater
+
+# --- 2. CONFIGURATION ---
 DB_PATH = "onetrack.db"
 
+# --- 3. DATA FETCHING ---
 def get_aus_stock_data():
     conn = sqlite3.connect(DB_PATH)
-    # Filters specifically for AUS and groups by Ticker
     query = """
     SELECT 
         Ticker, 
         SUM(Units) as Units, 
-        SUM(Purchase_Value) as Total_Cost,
+        SUM(Purchase_Value) as Total_Cost_AUD,
         MAX(Live_Price) as Live_Price,
         MIN(Purchase_Date) as First_Buy_Date
     FROM Investment 
@@ -30,6 +40,7 @@ def fetch_aus_sparklines(df):
     histories = []
     for ticker in df['Ticker']:
         try:
+            # Suffix .AX for Australian Yahoo Finance tickers
             h = yf.download(f"{ticker}.AX", period="7d", interval="1d", progress=False)['Close']
             histories.append(h.tolist())
         except:
@@ -37,53 +48,109 @@ def fetch_aus_sparklines(df):
     df['7D Trend'] = histories
     return df
 
+def color_metric(val):
+    if isinstance(val, (int, float)):
+        return f'color: {"#d62728" if val < 0 else "#2ca02c"}; font-weight: bold;'
+    return ''
+
+def get_detailed_aus_stock_rows():
+    conn = sqlite3.connect(DB_PATH)
+    query = """
+    SELECT 
+        Ticker, Purchase_Date, Units, 
+        Purchase_Price, Purchase_Value as Cost_AUD, 
+        Live_Price, Account_Platform
+    FROM Investment 
+    WHERE Country = 'AUS' AND Investment_Type <> 'ETF'
+    ORDER BY Purchase_Date DESC
+    """
+    df = pd.read_sql_query(query, conn)
+    conn.close()
+    return df
+
+# --- 4. PAGE UI SETUP ---
 st.set_page_config(page_title="AUS Stocks", layout="wide")
+show_sync_status() # Sidebar Green Dot
+
 st.title("🇦🇺 Australian Equity Analytics")
+st.caption("Individual ASX Holdings performance in AUD")
 
-df = get_aus_stock_data()
+# --- 5. EXECUTION & MATH ENGINE ---
+df_raw = get_aus_stock_data()
 
-if not df.empty:
-    # Calculations (Similar to US Stocks)
-    df['Current Value'] = df['Units'] * df['Live_Price']
-    df['Total Return ($)'] = df['Current Value'] - df['Total_Cost']
-    df['Total Return (%)'] = (df['Total Return ($)'] / df['Total_Cost']) * 100
-    df['Avg Price'] = df['Total_Cost'] / df['Units']
+if not df_raw.empty:
+    # Math logic (Rate is 1.0 for AUD/AUD)
+    df_raw['Current Value AUD'] = df_raw['Units'] * df_raw['Live_Price']
+    df_raw['Total Return AUD ($)'] = df_raw['Current Value AUD'] - df_raw['Total_Cost_AUD']
+    df_raw['Total Return (%)'] = (df_raw['Total Return AUD ($)'] / df_raw['Total_Cost_AUD']) * 100
+    df_raw['Avg Price'] = df_raw['Total_Cost_AUD'] / df_raw['Units']
+    
+    # Growth Stats (CAGR)
+    today = datetime.now()
+    df_raw['First_Buy_P'] = pd.to_datetime(df_raw['First_Buy_Date'], dayfirst=True, format='mixed', errors='coerce')
+    df_raw['Years_Held'] = (today - df_raw['First_Buy_P']).dt.days / 365.25
+    df_raw['Est. Return/Year (%)'] = (((df_raw['Current Value AUD'] / df_raw['Total_Cost_AUD']) ** (1 / df_raw['Years_Held'])) - 1) * 100
 
-    df = fetch_aus_sparklines(df)
+    df = fetch_aus_sparklines(df_raw)
 
+    # --- TOP LEVEL METRICS ---
+    m1, m2, m3 = st.columns(3)
+    
+    total_val_au = df['Current Value AUD'].sum()
+    total_cost_au = df['Total_Cost_AUD'].sum()
+    total_profit_au = df['Total Return AUD ($)'].sum()
+    
+    m1.metric("Total AUS Portfolio (AUD)", f"${total_val_au:,.2f}")
+    
+    overall_ret_pct = (total_profit_au / total_cost_au * 100) if total_cost_au > 0 else 0
+    m2.metric("Total AUS Profit (AUD)", f"${total_profit_au:,.2f}", delta=f"{overall_ret_pct:.2f}%")
+    
+    m3.metric("Avg Annual Growth (CAGR)", f"{df['Est. Return/Year (%)'].mean():.2f}%")
+    st.divider()
+
+    # --- DATA TABLE ---
     st.dataframe(
-        df.style.map(lambda x: f'color: {"#d62728" if x < 0 else "#2ca02c"}; font-weight: bold;', subset=['Total Return ($)', 'Total Return (%)']),
+        df.style.map(color_metric, subset=['Total Return AUD ($)', 'Total Return (%)', 'Est. Return/Year (%)']),
         column_config={
             "7D Trend": st.column_config.LineChartColumn("7D History", width="medium"),
-            "Current Value": st.column_config.NumberColumn("Market Value (AUD)", format="$%.0f"),
-            "Total Return ($)": st.column_config.NumberColumn("Total Profit", format="$%.2f"),
+            "Units": st.column_config.NumberColumn("Units", format="%.0f"),
+            "Live_Price": st.column_config.NumberColumn("Live Price", format="$%.2f"),
+            "Current Value AUD": st.column_config.NumberColumn("Market Value (AUD)", format="$%.2f"),
+            "Total Return AUD ($)": st.column_config.NumberColumn("Profit (AUD)", format="$%.2f"),
+            "Total Return (%)": st.column_config.NumberColumn("Return %", format="%.2f%%"),
+            "Est. Return/Year (%)": st.column_config.NumberColumn("CAGR", format="%.2f%%"),
         },
-        column_order=("Ticker", "7D Trend", "Units", "Avg Price", "Live_Price", "Current Value", "Total Return ($)", "Total Return (%)"),
+        column_order=(
+            "Ticker", "7D Trend", "Units", "Avg Price", "Live_Price", 
+            "Current Value AUD", "Total Return AUD ($)", "Total Return (%)", "Est. Return/Year (%)"
+        ),
         hide_index=True,
         use_container_width=True
     )
-        # --- MATH & GROWTH (AUS STOCKS) ---
-    today = datetime.now()
-    df['First_Buy_P'] = pd.to_datetime(df['First_Buy_Date'], dayfirst=True, format='mixed')
-    df['Years_Held'] = (today - df['First_Buy_P']).dt.days / 365.25
-    df['Est. Return/Year (%)'] = (((df['Current Value'] / df['Total_Cost']) ** (1 / df['Years_Held'])) - 1) * 100
 
-    # --- TOP LEVEL METRICS (AUS STOCKS) ---
     st.divider()
-    a1, a2, a3 = st.columns(3)
-    
-    total_val_au = df['Current Value'].sum()
-    total_cost_au = df['Total_Cost'].sum()
-    total_profit_au = df['Total Return ($)'].sum()
-    avg_growth_au = df['Est. Return/Year (%)'].mean()
+st.subheader("📄 Detailed Australian Transaction History")
+df_details = get_detailed_aus_stock_rows()
 
-    a1.metric("Total AUS Portfolio (AUD)", f"${total_val_au:,.2f}")
-    
-    overall_ret_pct_au = (total_profit_au / total_cost_au * 100) if total_cost_au > 0 else 0
-    a2.metric("Total AUS Profit (AUD)", f"${total_profit_au:,.2f}", delta=f"{overall_ret_pct_au:.2f}%")
-    
-    a3.metric("Avg Annual Growth (CAGR)", f"{avg_growth_au:.2f}%")
-    st.divider()
+if not df_details.empty:
+    # No FX conversion needed for AUS stocks
+    df_details['Value_AUD'] = df_details['Units'] * df_details['Live_Price']
+    df_details['Profit_AUD'] = df_details['Value_AUD'] - df_details['Cost_AUD']
+    df_details['Growth_%'] = (df_details['Profit_AUD'] / df_details['Cost_AUD']) * 100
 
+    st.dataframe(
+        df_details.style.map(color_metric, subset=['Profit_AUD', 'Growth_%']),
+        column_config={
+            "Purchase_Date": st.column_config.DateColumn("Date"),
+            "Units": st.column_config.NumberColumn("Qty", format="%.0f"),
+            "Purchase_Price": st.column_config.NumberColumn("Buy Price", format="$%.2f"),
+            "Cost_AUD": st.column_config.NumberColumn("Cost (AUD)", format="$%.2f"),
+            "Value_AUD": st.column_config.NumberColumn("Value (AUD)", format="$%.2f"),
+            "Profit_AUD": st.column_config.NumberColumn("P/L", format="$%.2f"),
+            "Growth_%": st.column_config.NumberColumn("%", format="%.2f%%"),
+        },
+        column_order=("Ticker", "Purchase_Date", "Units", "Purchase_Price", "Cost_AUD", "Value_AUD", "Profit_AUD", "Growth_%"),
+        hide_index=True, use_container_width=True
+    )
 else:
     st.info("No Australian Stock data found.")
