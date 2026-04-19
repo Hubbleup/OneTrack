@@ -1,4 +1,5 @@
 import sqlite3
+from time import time
 import yfinance as yf
 import os
 import pandas as pd
@@ -16,65 +17,65 @@ class PortfolioUpdater:
     def refresh_live_prices(self):
         conn = self._get_connection()
         cursor = conn.cursor()
-
-        # 1. Fetch Ticker, Country, and Currency
-        cursor.execute("SELECT DISTINCT Ticker, Country, Currency FROM Investment")
+       
+        # 1. Fetch unique tickers and countries
+        cursor.execute("""SELECT DISTINCT Ticker, Country 
+        FROM Investment 
+        WHERE Remain_Balance IS NOT NULL 
+          AND Remain_Balance > 0""")  # Only update active investments
         db_rows = cursor.fetchall()
-
         if not db_rows:
             conn.close()
             return
 
-        # 2. Map original tickers to Yahoo Symbols (Handles IND, AUS, USA)
-        ticker_map = {}
-        for ticker, country, currency in db_rows:
+        # 2. Build Ticker Mapping for Yahoo Finance
+        symbols = []
+        ticker_to_yahoo = {}
+        for ticker, country in db_rows:
             if not ticker: continue
-            if country == "AUS": symbol = f"{ticker}.AX"
-            elif country == "IND": symbol = f"{ticker}.BO" # Added India Suffix
-            else: symbol = ticker # USA usually needs no suffix
-            ticker_map[symbol] = ticker
+            # Suffix logic: .AX for Aus, none for US
+            yahoo_sym = f"{ticker}.AX" if country == "AUS" else (f"{ticker}.BO" if country == "IND" else ticker)
+            symbols.append(yahoo_sym)
+            ticker_to_yahoo[ticker] = yahoo_sym
 
-        symbols = list(ticker_map.keys())
-        
-        # 3. Download data
         try:
-            # We fetch 5d to ensure we don't get an empty 'today' on weekends
+            # Download data (fetching 5 days ensures a price even on weekends)
+            
             data = yf.download(symbols, period="5d", interval="1d", progress=False)
+            
+            # Extract the latest 'Close' price for each symbol into a dictionary
+            if len(symbols) == 1:
+                prices = {symbols[0]: data['Close'].iloc[-1]}
+            else:
+                prices = data['Close'].ffill().iloc[-1].to_dict()
         except Exception as e:
-            print(f"❌ Yahoo Finance Error: {e}")
+            print(f"❌ Market Fetch Error: {e}")
             conn.close()
             return
 
-        updates_count = 0
-
-        for yahoo_symbol, original_ticker in ticker_map.items():
-            try:
-                # Handle MultiIndex vs Single Index columns safely
-                if len(symbols) > 1:
-                    ticker_series = data['Close'][yahoo_symbol]
-                else:
-                    ticker_series = data['Close']
-
-                current_price = ticker_series.ffill().iloc[-1]
-
-                if pd.isna(current_price) or current_price == 0:
-                    continue
-
-                # 4. Update the DB (Ensuring column names match your Net Worth logic)
+        # 3. Update Database (Handling NULLs with COALESCE)
+        for ticker, yahoo_sym in ticker_to_yahoo.items():
+            current_price = prices.get(yahoo_sym)
+            
+            if current_price and not pd.isna(current_price):
+                # COALESCE(column, default) prevents the 'Multiplication by NULL' error
                 cursor.execute("""
                     UPDATE Investment 
                     SET Live_Price = ?, 
-                        Live_Value = ? * Units,
-                        Capital_Gain_Value = (? * Units) - Purchase_Value
+                        Live_Value = (? * Units * COALESCE(Exchange_Rate, 1.0)),
+                        Capital_Gain_Value = (? * Units * COALESCE(Exchange_Rate, 1.0)) - Purchase_Value,
+                        Capital_Gain_Percent = (
+                            ((? * Units * COALESCE(Exchange_Rate, 1.0)) - Purchase_Value) / 
+                            NULLIF(Purchase_Value, 0)
+                        ) * 100
                     WHERE Ticker = ?
-                """, (current_price, current_price, current_price, original_ticker))
-                
-                updates_count += 1
-            except Exception as e:
-                print(f"⚠️ Error on {original_ticker}: {e}")
+                        AND Remain_Balance > 0
+                """, (current_price, current_price, current_price, current_price, ticker))
 
         conn.commit()
         conn.close()
+
+
 
     def get_live_exchange_rates(self):
         """Fetches dynamic rates. Logic updated to work with or without Streamlit."""

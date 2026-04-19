@@ -119,6 +119,7 @@ if not df_raw.empty:
     st.dataframe(
         df.style.map(color_metric, subset=['Total Return ($)', 'Total Return (%)', 'Est. Return/Year (%)']),
         column_config={
+            "Units": st.column_config.NumberColumn("Units", format="%.0f"),
             "7D Trend": st.column_config.LineChartColumn("7D History", width="medium"),
             "Live_Price": st.column_config.NumberColumn("Price (Local)", format="$%.2f"),
             "Current Value AUD": st.column_config.NumberColumn("Market Value (AUD)", format="$%.2f"),

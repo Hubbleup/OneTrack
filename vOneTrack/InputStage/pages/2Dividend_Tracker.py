@@ -178,6 +178,6 @@ st.divider()
 st.subheader("🗓️ Recent Dividend Payments Received")
 recent_df = viz.fetch_recent_payments(limit=5)
 if not recent_df.empty:
-    st.table(recent_df.style.format({'Per Share': '${:.4f}', 'Total': '${:.2f}'}))
+    st.table(recent_df.style.format({'Per Share': '${:.0f}', 'Total': '${:.2f}'}))
 else:
     st.info("No historical payments found.")

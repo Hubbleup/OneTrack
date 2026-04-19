@@ -6,39 +6,41 @@ import plotly.graph_objects as go
 import yfinance as yf
 from datetime import datetime
 import threading
-import time
 import os
 import sys
 
+# --- 1. SETUP & PATHS ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
-# Internal Imports (Ensure these files exist in your folder)
+DB_PATH = "onetrack.db"
+
+# Internal Imports
 from Portfolio_updater import PortfolioUpdater 
 from uploadtoGSfromDB import upload_db_to_sheet
-from utils import show_sync_status  # From your new InputStage/pages/utils.py
+from utils import show_sync_status 
 
-# --- 1. BACKGROUND SYNC ENGINE ---
+# --- 2. BACKGROUND SYNC ENGINE ---
 if 'sync_started' not in st.session_state:
-    updater = PortfolioUpdater("onetrack.db")
+    updater = PortfolioUpdater(DB_PATH)
     # daemon=True ensures the thread closes when the app stops
     thread = threading.Thread(target=updater.run_continuous_sync, args=(300,), daemon=True)
     thread.start()
     st.session_state.sync_started = True
 
-# --- 2. PAGE CONFIG & UI STATUS ---
-st.set_page_config(page_title="Net Worth Tracker", layout="wide")
-show_sync_status() # Displays the Green Dot in Sidebar
+# --- 3. PAGE CONFIG ---
+st.set_page_config(page_title="Net Worth Tracker", layout="wide", page_icon="💹")
+show_sync_status() 
 
-# --- 3. DATA FETCHING ---
+# --- 4. DATA FETCHING FUNCTIONS ---
+
 @st.cache_data(ttl=3600)
 def get_portfolio_with_history(df):
-    """Fetches last 7 days of prices for sparklines."""
+    """Fetches 7-day price history for sparkline charts."""
     history_sparklines = []
     for _, row in df.iterrows():
-        ticker = row['Ticker']
-        country = row['Country']
+        ticker, country = row['Ticker'], row['Country']
         symbol = f"{ticker}.AX" if country == "AUS" else (f"{ticker}.BO" if country == "IND" else ticker)
         try:
             h = yf.download(symbol, period="7d", interval="1d", progress=False)['Close']
@@ -49,57 +51,98 @@ def get_portfolio_with_history(df):
     return df
 
 def get_investment_data():
-    conn = sqlite3.connect("onetrack.db")
+    """Aggregates investment data from SQLite."""
+    conn = sqlite3.connect(DB_PATH)
     query = """
-    SELECT 
-        Ticker, 
-        Country, 
-        SUM(Units) as Units, 
-        SUM(Purchase_Value) as Total_Cost_AUD,
-        MAX(Live_Price) as Live_Price,
-        MIN(Purchase_Date) as Oldest_Purchase,
-        MAX(Purchase_Date) as Newest_Purchase
+    SELECT Ticker, Country, SUM(Units) as Units, SUM(Purchase_Value) as Total_Cost_AUD,
+           MAX(Live_Price) as Live_Price, MIN(Purchase_Date) as Oldest_Purchase,
+           MAX(Purchase_Date) as Newest_Purchase
     FROM Investment 
+    WHERE Remain_Balance > 0 OR Remain_Balance IS NULL
     GROUP BY Ticker, Country
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
     return df
 
-# --- 4. CALCULATION & STYLING ---
-def color_returns(val):
-    if isinstance(val, (int, float)):
-        return f'color: {"#d62728" if val < 0 else "#2ca02c"}; font-weight: bold;'
-    return ''
+def get_latest_super_balance():
+    """Fetches the most recent balance for each super fund."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        query = """
+        SELECT SUM(value_aud) as Total_Super FROM (
+            SELECT value_aud, ROW_NUMBER() OVER (PARTITION BY super_name ORDER BY recorded_date DESC) as rn
+            FROM Super_Tracking
+        ) WHERE rn = 1
+        """
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        return df['Total_Super'].iloc[0] if not df.empty and df['Total_Super'].iloc[0] is not None else 0.0
+    except:
+        conn.close()
+        return 0.0
+
+# --- 5. PLOTTING & DISPLAY FUNCTIONS ---
+
+def plot_ticker_performance(ticker, country, db_path):
+    """Generates the 'Journey' chart showing price trend and purchase points."""
+    conn = sqlite3.connect(db_path)
+    trades = pd.read_sql(
+        f"SELECT Purchase_Date, Purchase_Price, Units FROM Investment WHERE Ticker='{ticker}' ORDER BY Purchase_Date ASC", 
+        conn
+    )
+    conn.close()
+
+    if trades.empty:
+        return None
+
+    trades['Purchase_Date'] = pd.to_datetime(trades['Purchase_Date'])
+    start_date = trades['Purchase_Date'].min()
+    yahoo_sym = f"{ticker}.AX" if country == "AUS" else ticker
+
+    hist_data = yf.download(yahoo_sym, start=start_date, interval="1d", progress=False)
+    if hist_data.empty:
+        return None
+        
+    hist_df = hist_data['Close'].reset_index()
+    hist_df.columns = ['Date', 'Close']
+
+    fig = go.Figure()
+    # Market Price Line
+    fig.add_trace(go.Scatter(x=hist_df['Date'], y=hist_df['Close'], mode='lines', name='Price', line=dict(color='#2ca02c', width=2)))
+    # Purchase Points
+    fig.add_trace(go.Scatter(
+        x=trades['Purchase_Date'], y=trades['Purchase_Price'], mode='markers', name='Buy',
+        marker=dict(symbol='triangle-up', size=12, color='#1f77b4', line=dict(width=2, color='white')),
+        text=trades['Units'].apply(lambda x: f"Bought {x:.0f} units"),
+        hoverinfo="text+x+y"
+    ))
+    fig.update_layout(title=f"Performance Journey: {ticker}", template="plotly_white", hovermode="x unified")
+    return fig
 
 def show_performance_summary(df):
+    """Displays the regional subtotal and net worth table."""
     st.subheader("🏢 Regional Performance Summary (in AUD)")
-    updater = PortfolioUpdater("onetrack.db")
+    updater = PortfolioUpdater(DB_PATH)
     rates = updater.get_live_exchange_rates()
-    st.caption(f"💱 Live Rates Used: USD/AUD: {rates.get('USA', 1.54):.4f} | INR/AUD: {rates.get('IND', 0.018):.4f}")
-
-    # --- MATH ENGINE (Updates the main df) ---
+    
     df['Rate'] = df['Country'].map(rates).fillna(1.0)
     df['Cost_AUD'] = df['Total_Cost_AUD'] 
     df['Value_AUD'] = (df['Units'] * df['Live_Price']) * df['Rate']
-    
-    # These two columns MUST be added to df here
     df['Profit_AUD'] = df['Value_AUD'] - df['Cost_AUD']
     df['Return_Pct'] = (df['Profit_AUD'] / df['Cost_AUD']) * 100
     
-    # 1. Create the small Summary Table for the Top of the page
     summary = df.groupby('Country').agg({'Value_AUD': 'sum', 'Cost_AUD': 'sum'}).reset_index()
     summary.columns = ['Region', 'Total Asset Value', 'Total Cost']
 
-    # 2. Subtotal & Grand Total Rows
-    ex_ind_mask = summary['Region'].isin(['AUS', 'USA'])
-    sub_val, sub_cost = summary.loc[ex_ind_mask, 'Total Asset Value'].sum(), summary.loc[ex_ind_mask, 'Total Cost'].sum()
-    sub_row = pd.DataFrame([['SUBTOTAL (AUS + USA)', sub_val, sub_cost]], columns=summary.columns)
+    latest_super = get_latest_super_balance()
+    super_row = pd.DataFrame([['SUPERANNUATION', latest_super, latest_super]], columns=summary.columns)
     
-    tot_val, tot_cost = summary['Total Asset Value'].sum(), summary['Total Cost'].sum()
-    tot_row = pd.DataFrame([['TOTAL PORTFOLIO', tot_val, tot_cost]], columns=summary.columns)
+    total_val = summary['Total Asset Value'].sum() + latest_super
+    total_cost = summary['Total Cost'].sum() + latest_super
+    total_row = pd.DataFrame([['TOTAL NET WORTH', total_val, total_cost]], columns=summary.columns)
 
-    summary = pd.concat([summary, sub_row, tot_row], ignore_index=True)
+    summary = pd.concat([summary, super_row, total_row], ignore_index=True)
     summary['Total Return ($)'] = summary['Total Asset Value'] - summary['Total Cost']
     summary['Total Return (%)'] = (summary['Total Return ($)'] / summary['Total Cost']) * 100
 
@@ -107,72 +150,85 @@ def show_performance_summary(df):
         'Total Asset Value': '${:,.2f}', 'Total Cost': '${:,.2f}',
         'Total Return ($)': '${:,.2f}', 'Total Return (%)': '{:.2f}%'
     }))
-    
-    return df # This ensures Profit_AUD and Return_Pct are passed back out
+    return df
 
-# --- 5. VISUALS ---
 def show_stacked_growth_bar(df):
+    """Displays bar chart of Invested vs Growth."""
     st.divider()
     st.subheader("📊 Ticker Value: Invested vs. Growth (AUD)")
     df_sorted = df.sort_values('Value_AUD', ascending=False)
     fig = go.Figure()
     fig.add_trace(go.Bar(x=df_sorted['Ticker'], y=df_sorted['Cost_AUD'], name='Invested', marker_color='#1f77b4'))
-    #fig.add_trace(go.Bar(x=df_sorted['Ticker'], y=df_sorted['Profit_AUD'], name='Growth', marker_color='#2ca02c'))
     fig.add_trace(go.Bar(x=df_sorted['Ticker'], y=df_sorted['Profit_AUD'], name='Growth', marker_color='#2ca02c',
-                         text=df_sorted['Return_Pct'].round(1).astype(str) + "%", textposition='outside'))
+                        text=df_sorted['Return_Pct'].round(1).astype(str) + "%", textposition='outside'))
     fig.update_layout(barmode='stack', template="plotly_white", yaxis=dict(tickprefix="$"))
     st.plotly_chart(fig, use_container_width=True)
 
-# --- MAIN UI ---
-st.title("💰 Net Worth & Investment Tracker")
+# --- 6. MAIN EXECUTION & TABS ---
 
-c1, c2 = st.columns(2)
-with c1:
-    if st.button("🔄 Refresh Local Prices"):
-        with st.spinner("Syncing..."):
-            updater.refresh_live_prices()
-        st.rerun()
-with c2:
-    if st.button("☁️ Push to Google Sheets"):
-        success, msg = upload_db_to_sheet()
-        st.success(msg) if success else st.error(msg)
+st.title("💰 Net Worth & Portfolio Analytics")
 
+# Define Tabs
+tab_overview, tab_analytics = st.tabs(["📊 Portfolio Overview", "📈 Ticker Performance Journey"])
+
+# Data Preparation
 df_raw = get_investment_data()
 
 if not df_raw.empty:
-    df = show_performance_summary(df_raw)
+    # --- TAB 1: PORTFOLIO OVERVIEW ---
+    with tab_overview:
+        df = show_performance_summary(df_raw)
+        
+        # Years Holding Period Calculation
+        today = datetime.now()
+        df['Oldest_P'] = pd.to_datetime(df['Oldest_Purchase'], errors='coerce')
+        df['Age (Years)'] = ((today - df['Oldest_P']).dt.days / 365.25).fillna(0).map(lambda x: f"{x:.1f} years")
 
-    # Date Logic
-    today = datetime.now()
-    df['Oldest_P'] = pd.to_datetime(df['Oldest_Purchase'], dayfirst=True, format='mixed', errors='coerce')
-    df['Newest_P'] = pd.to_datetime(df['Newest_Purchase'], dayfirst=True, format='mixed', errors='coerce')
+        # Get Sparkline Data
+        with st.spinner("Loading market trends..."):
+            df = get_portfolio_with_history(df)
 
-    # Calculate years as a decimal
-    df['Age_Years'] = (today - df['Oldest_P']).dt.days / 365.25
+        st.subheader("📊 Consolidated Portfolio Analytics")
+        st.dataframe(
+            df.style.applymap(lambda x: f'color: {"#d62728" if x < 0 else "#2ca02c"}; font-weight: bold;', subset=['Profit_AUD', 'Return_Pct']),
+            column_config={
+                "Units": st.column_config.NumberColumn("Units", format="%.0f"),
+                "Live_Price": st.column_config.NumberColumn("Live Price", format="$%.2f"),
+                "7D Trend": st.column_config.LineChartColumn("7D History"),
+                "Value_AUD": st.column_config.NumberColumn("Value (AUD)", format="$%.2f"),
+                "Profit_AUD": st.column_config.NumberColumn("Profit", format="$%.2f"),
+                "Return_Pct": st.column_config.NumberColumn("Return %", format="%.2f%%"),
+            },
+            column_order=("Ticker", "7D Trend", "Units", "Live_Price", "Value_AUD", "Profit_AUD", "Return_Pct", "Age (Years)"),
+            hide_index=True, use_container_width=True
+        )
+        
+        show_stacked_growth_bar(df)
 
-    # Format for display (e.g., "1.4 years")
-    df['Age (Years)'] = df['Age_Years'].map(lambda x: f"{x:.1f} years" if pd.notnull(x) else "N/A")
+    # --- TAB 2: TICKER PERFORMANCE JOURNEY ---
+    with tab_analytics:
+        st.subheader("🚀 Ticker Performance Journey")
+        st.caption("Visualise price movement and purchase points from your first trade.")
+        
+        all_tickers = df_raw['Ticker'].unique().tolist()
 
-    df = get_portfolio_with_history(df)
-
-    st.subheader("📊 Consolidated Portfolio Analytics")
-    st.dataframe(
-        df.style.applymap(color_returns, subset=['Profit_AUD', 'Return_Pct']),
-        column_config={
-            "7D Trend": st.column_config.LineChartColumn("7D History", width="medium"),
-            "Live_Price": st.column_config.NumberColumn("Live Price (Local)", format="$%.2f"),
-            "Value_AUD": st.column_config.NumberColumn("Market Value (AUD)", format="$%.2f"),
-            "Profit_AUD": st.column_config.NumberColumn("Profit (AUD)", format="$%.2f"),
-            "Return_Pct": st.column_config.NumberColumn("Return %", format="%.2f%%"),
-            "Age (Years)": st.column_config.TextColumn("Holding Period", help="Years since first purchase"),
-        },
-        column_order=("Ticker", "7D Trend", "Units", "Live_Price", "Value_AUD", "Profit_AUD", "Return_Pct", "Age (Years)"),
-        hide_index=True, use_container_width=True
-    )
-
-    show_stacked_growth_bar(df)
-    
-    st.subheader("🥧 Asset Distribution")
-    st.plotly_chart(px.pie(df, values='Value_AUD', names='Country', hole=0.4), use_container_width=True)
+        if all_tickers:
+            selected = st.selectbox("Select Ticker to Analyse", all_tickers, key="trend_selector")
+            
+            # Fetch country for suffix logic
+            ticker_info = df_raw[df_raw['Ticker'] == selected].iloc[0]
+            
+            with st.spinner(f"Fetching journey for {selected}..."):
+                fig = plot_ticker_performance(selected, ticker_info['Country'], DB_PATH)
+            
+            if fig:
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info(f"Market data for {selected} is currently unavailable.")
 else:
-    st.info("No data found.")
+    st.warning("No investment data found. Please add assets in the Input Stage.")
+
+# Sidebar Actions
+if st.sidebar.button("📤 Manual Sync to Google Sheets"):
+    upload_db_to_sheet()
+    st.sidebar.success("Sync complete!")

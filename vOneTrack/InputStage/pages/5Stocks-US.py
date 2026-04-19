@@ -134,7 +134,7 @@ if not df_raw.empty:
         use_container_width=True
     )
     
-    st.caption(f"💱 Using Live FX Rate: 1 USD = {usd_aud_rate:.4f} AUD")
+    st.caption(f"💱 Using Live FX Rate: 1 USD = {usd_aud_rate:.2f} AUD")
 
     st.divider()
 st.subheader("📄 Detailed US Transaction History")

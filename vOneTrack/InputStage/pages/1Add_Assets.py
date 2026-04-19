@@ -3,7 +3,9 @@ import sqlite3
 import os
 import sys
 import pandas as pd
-from datetime import datetime
+import plotly.express as px
+from datetime import datetime, date
+import re
 
 #Scope for the GmailService
 default_scope = ['https://www.googleapis.com/auth/gmail.readonly']
@@ -14,17 +16,29 @@ parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
-# Import of custom modules
-from googleapi import fetch_emails_for_sender, create_google_service, get_messages_from_sender
+from googleapi import create_google_service, get_messages_from_sender
 from Calculate_dividend import DividendCalculator
 from Portfolio_updater import PortfolioUpdater 
 
-# DB Path
 DB_PATH = os.path.join(parent_dir, "onetrack.db")
 
-# 2. DATABASE LOGIC
+# --- 2. DATABASE LOGIC ---
+def init_super_db():
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS Super_Tracking (
+            row_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            super_name TEXT NOT NULL,
+            recorded_date DATE NOT NULL,
+            value_aud REAL NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.commit()
+    conn.close()
+
 def add_investment(ticker, units, price, date, country, currency):
-    """Inserts a new investment record into the database."""
     purchase_value = units * price
     try:
         conn = sqlite3.connect(DB_PATH)
@@ -33,25 +47,15 @@ def add_investment(ticker, units, price, date, country, currency):
             INSERT INTO Investment (
                 Ticker, Units, Purchase_Price, Purchase_Value, 
                 Purchase_Date, Country, Currency, Remain_Balance,
-                Live_Price, Live_Value, Capital_Gain_Value, Capital_Gain_Percent
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0)
-        """, (
-            ticker.upper(),  # 1
-            units,           # 2
-            price,           # 3
-            purchase_value,  # 4 
-            date,            # 5
-            country,         # 6
-            currency,        # 7
-            units            # 8
-        ))
+                Live_Price, Live_Value, Capital_Gain_Value, Capital_Gain_Percent, Investment_Type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 'Equity')
+        """, (ticker.upper(), units, price, purchase_value, date, country, currency, units))
         conn.commit()
         conn.close()
         return True
     except Exception as e:
-        st.error(f"Error updating database: {e}")
+        st.error(f"Error: {e}")
         return False
-
 def run_sync():
     # 1. Setup paths
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -82,86 +86,254 @@ def run_sync():
         messages = get_messages_from_sender(service, 'brokingservice@cmcmarkets.com.au')
         all_data.extend(messages)
         print(f"Success: Found {len(messages)} messages for {account_id}")
-
-    return all_data
+    
+    return {
+        "data": all_data,
+    "service": service
+    }
 
 #if __name__ == "__main__":
     #final_assets = run_sync()
 
-# --- UI START ---
-st.set_page_config(page_title="Add Assets", layout="wide")
 
-# SECTION A: MANUAL FORM
-st.title("➕ Register New Investment")
-with st.form("investment_form", clear_on_submit=True):
+def save_super_entry(name, r_date, value):
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO Super_Tracking (super_name, recorded_date, value_aud) VALUES (?, ?, ?)", (name, r_date, value))
+    conn.commit()
+    conn.close()
+
+def get_super_history():
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df = pd.read_sql_query("SELECT * FROM Super_Tracking ORDER BY recorded_date ASC", conn)
+    except:
+        df = pd.DataFrame()
+    conn.close()
+    return df
+
+def clean_currency_string(value):
+    """Removes ' USD', ' AUD', commas, and spaces to return a clean float."""
+    if pd.isna(value) or value == "":
+        return 0.0
+    if isinstance(value, str):
+        # Keeps only digits (0-9) and the decimal point (.)
+        # This turns '132.8500 USD' into '132.8500'
+        cleaned = re.sub(r'[^0-9.]', '', value)
+        try:
+            return float(cleaned)
+        except ValueError:
+            return 0.0
+    return float(value)
+
+def map_cmc_csv(df):
+    mapped_rows = []
+    
+    for _, row in df.iterrows():
+        # ... (your existing Ticker/Country/Currency logic) ...
+
+        mapped_entry = {
+            "Ticker": ticker,
+            "Units": clean_currency_string(row['Quantity']),
+            "Purchase_Price": clean_currency_string(row['Price']),
+            "Avg_Purchase_Price": clean_currency_string(row['Avg Price']),
+            "Exchange_Rate": clean_currency_string(row['Exch Rate']),
+            "Purchase_Value": clean_currency_string(row['Consideration']),
+            "Purchase_Date": pd.to_datetime(row['Trade Date'], dayfirst=True).strftime('%Y-%m-%d'),
+            "Country": country,
+            "Currency": currency,
+            "Remain_Balance": clean_currency_string(row['Quantity']),
+            
+            # --- ADD THESE MISSING COLUMNS TO SATISFY DATABASE CONSTRAINTS ---
+            "Live_Price": 0.0,
+            "Live_Value": 0.0,
+            "Capital_Gain_Value": 0.0,
+            "Capital_Gain_Percent": 0.0,
+            "Investment_Type": "Equity"
+        }
+        mapped_rows.append(mapped_entry)
+        
+    return pd.DataFrame(mapped_rows)
+
+def map_Vanguard_csv(df):
+    mapped_rows = []
+    
+    for _, row in df.iterrows():
+        ticker = row['Product ID'].strip().upper()
+        country = "AUS" if len(ticker) <= 4 else "USA"
+        currency = "AUD" if country == "AUS" else "USD"
+        # ... (your existing Ticker/Country/Currency logic) ...
+        #'Product ID', 'Trade Date', 'Value', 'Unit Price', 'Quantity', 'Product Type'
+        mapped_entry = {
+            "Ticker": row['Product ID'],
+            "Units": clean_currency_string(row['Quantity']),
+            "Purchase_Price": clean_currency_string(row['Unit Price']),
+            "Purchase_Value": clean_currency_string(row['Value']),
+            "Purchase_Date": pd.to_datetime(row['Trade Date'], dayfirst=True).strftime('%Y-%m-%d'),
+            "Country": country,
+            "Currency": currency,
+            "Remain_Balance": clean_currency_string(row['Quantity']),
+            
+            # --- ADD THESE MISSING COLUMNS TO SATISFY DATABASE CONSTRAINTS ---
+            "Live_Price": 0.0,
+            "Live_Value": 0.0,
+            "Capital_Gain_Value": 0.0,
+            "Capital_Gain_Percent": 0.0,
+            "Investment_Type": row['Product Type']  # Default value - adjust based on 'Product Type' if needed
+        }
+        mapped_rows.append(mapped_entry)
+        
+    return pd.DataFrame(mapped_rows)
+
+init_super_db()
+
+# --- 3. UI CONFIGURATION ---
+st.set_page_config(page_title="Asset Console", layout="wide", page_icon="💹")
+st.title("💼 Portfolio Management Console")
+
+# Create Main Tabs
+tab_trading, tab_super = st.tabs(["📉 Trading Desk (Stocks/ETFs)", "🛡️ Superannuation Vault"])
+
+# --- TAB 1: TRADING DESK (Manual + Email Intelligence) ---
+with tab_trading:
+    # --- Part A: Manual Form ---
+    st.subheader("⌨️ Manual Trade Entry")
+    with st.form("investment_form", clear_on_submit=True):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            ticker = st.text_input("Ticker Symbol", placeholder="e.g. NVDA")
+            units = st.number_input("Units", min_value=0.0, format="%.0f")
+        with c2:
+            price = st.number_input("Purchase Price (Local)", min_value=0.0)
+            purchase_date = st.date_input("Trade Date", value=datetime.now())
+        with c3:
+            country = st.selectbox("Market Country", ["USA", "AUS", "IND"])
+            currency = st.selectbox("Local Currency", ["USD", "AUD", "INR"])
+
+        if st.form_submit_button("🚀 Record Manual Trade", use_container_width=True):
+            if ticker and units > 0:
+                 # Step 1: Save to DB
+                success = add_investment(ticker, units, price, purchase_date.strftime('%Y-%m-%d'), country, currency)
+            
+                if success:
+                    # Step 2: Trigger Live Calculation
+                    with st.spinner(f"Fetching live price for {ticker.upper()}..."):
+                        try:
+                            updater = PortfolioUpdater(DB_PATH)
+                            updater.refresh_live_prices()
+                            st.toast(f"✅ {ticker.upper()} added with Live Data!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Trade saved, but Live Update failed: {e}")
+            else:
+                st.warning("Ticker and Units are required.")
+
+    st.divider()
+
+# --- Part B: Unified Broker Intelligence ---
+st.subheader("📁 Intelligence: Broker Import")
+st.caption("Select your broker and upload the trade confirmation CSV.")
+
+# 1. User Input Parameters
+broker_choice = st.selectbox("Select Broker", ["CMC Markets", "Vanguard Australia"], key="broker_selector")
+uploaded_file = st.file_uploader("Upload Trade CSV", type="csv", key="broker_csv_uploader")
+
+if uploaded_file:
+    try:
+        raw_df = pd.read_csv(uploaded_file)
+        
+        if st.button("🛠️ Map & Preview Trades", use_container_width=True):
+            # --- ROUTING LOGIC ---
+            if broker_choice == "CMC Markets":
+                required = ['AsxCode', 'Trade Date', 'Consideration', 'Exch Rate', 'Avg Price', 'Price', 'Quantity']
+                if all(col in raw_df.columns for col in required):
+                    st.session_state['pending_trades'] = map_cmc_csv(raw_df)
+                    st.success(f"Mapped {len(raw_df)} CMC trades.")
+                else:
+                    st.error("CSV headers don't match CMC format. Check your export.")
+
+            elif broker_choice == "Vanguard Australia":
+                required = ['Product ID', 'Trade Date', 'Value', 'Unit Price', 'Quantity', 'Product Type']
+                if all(col in raw_df.columns for col in required):
+                    st.session_state['pending_trades'] = map_Vanguard_csv(raw_df)
+                    st.success(f"Mapped {len(raw_df)} Vanguard trades.")
+                else:
+                    st.error("CSV headers don't match Vanguard format. Check your export.")
+    except Exception as e:
+        st.error(f"Failed to read file: {e}")
+
+# --- 2. Review and Batch Import (Shared for all brokers) ---
+if 'pending_trades' in st.session_state:
+    df_pending = st.session_state['pending_trades']
+    st.write(f"### Review {broker_choice} Trades")
+    st.dataframe(df_pending, use_container_width=True, hide_index=True)
+    
     col1, col2 = st.columns(2)
     with col1:
-        ticker = st.text_input("Ticker Symbol", placeholder="e.g. AAPL").strip()
-        units = st.number_input("Units", min_value=0.0, format="%.4f")
-        price = st.number_input("Purchase Price", min_value=0.0)
-    with col2:
-        purchase_date = st.date_input("Date", value=datetime.now())
-        country = st.selectbox("Country", ["USA", "AUS", "IND"])
-        currency = st.selectbox("Currency", ["USD", "AUD", "INR"])
-
-    if st.form_submit_button("Add Manually"):
-        if ticker and add_investment(ticker, units, price, purchase_date.strftime('%Y-%m-%d'), country, currency):
-            st.success(f"Added {ticker}!")
-
-st.divider()
-
-# SECTION B: GMAIL AUTOMATION
-st.subheader("📧 Trade Importer")
-st.write("Scan your inbox for CMC Markets buy orders.")
-
-if st.button("🔍 Sync with mail"):
-    with st.spinner("Fetching emails from all accounts..."):
-        # CALL your new multi-account function
-        messages = run_sync() 
-        
-        if messages:
-            calc = DividendCalculator(DB_PATH)
-            # This is where the magic "mapping" happens
-            #trades = calc.extract_trade_data(messages) 
-            st.session_state['pending_trades'] = pd.DataFrame(calc.extract_trade_data(messages))
-            st.success(f"Found {len(st.session_state['pending_trades'])} trades.")
-        else:
-            st.warning("No new buy orders found")
-
-# SECTION C: APPROVAL TABLE
-if 'pending_trades' in st.session_state:
-    df = st.session_state['pending_trades']
-    
-    st.write("### Review & Approve Extracts")
-    
-    event = st.dataframe(
-        df,
-        use_container_width=True,
-        hide_index=True,
-        on_select="rerun",
-        selection_mode="multi-row"
-    )
-
-    selected_indices = event.selection.rows
-    
-    # Only show the button if rows are actually selected
-    if selected_indices:
-        if st.button(f"✅ Import {len(selected_indices)} Selected Trades"):
-            approved_df = df.iloc[selected_indices]
-            success_count = 0 
-
-            for _, row in approved_df.iterrows():
-                if add_investment(row['Ticker'], row['Units'], row['Price'], row['Date'], "AUS", row['Currency']):
-                    success_count += 1
-            
-            if success_count > 0:
-                with st.spinner("🔄 Syncing live values for new assets..."):
-                    updater = PortfolioUpdater(db_path=DB_PATH) # Reusing your existing global sync function
+        if st.button("🚀 Import All to Database", type="primary", use_container_width=True):
+             try:
+                # Step 1: Batch Save CSV data
+                conn = sqlite3.connect(DB_PATH)
+                df_pending.to_sql('Investment', conn, if_exists='append', index=False)
+                conn.close()
+                
+                # Step 2: Batch Refresh all prices (Replaces 0.0s with real numbers)
+                with st.spinner("Synchronising with Market Data..."):
+                    updater = PortfolioUpdater(DB_PATH)
                     updater.refresh_live_prices()
-                st.success(f"Successfully imported {success_count} trades and updated live prices!")
-                # Use a toast or a persistent message before rerunning
-
-                # Remove the data so the table goes away
+                    
+                st.toast("✅ All trades imported and prices updated!")
                 del st.session_state['pending_trades']
-                # Rerun to refresh the UI and clear the table
                 st.rerun()
+             except Exception as e:
+                st.error(f"Critical Import Error: {e}")
+    with col2:
+        if st.button("❌ Clear/Cancel", use_container_width=True):
+            del st.session_state['pending_trades']
+            st.rerun()
+
+# --- TAB 2: SUPERANNUATION VAULT ---
+with tab_super:
+    super_data = get_super_history()
+    
+    # Header Metrics
+    m1, m2 = st.columns(2)
+    latest_combined_super_balance=super_data.sort_values('recorded_date').drop_duplicates('super_name', keep='last')['value_aud'].sum()
+    latest_val = latest_combined_super_balance if not super_data.empty else 0
+    m1.metric("🏦 Current Super Balance", f"${latest_val:,.2f}")
+    if len(super_data) > 1:
+        prev_val = super_data['value_aud'].iloc[-2]
+        change = latest_val - prev_val
+        m2.metric("📈 Last Growth Step", f"${change:,.2f}", delta=f"${change:,.2f}")
+
+    st.subheader("📝 Log New Balance Check")
+    dropdown_options = ["BRIGHTER SUPER", "PLUM SUPER"]
+
+    with st.form("super_form", clear_on_submit=True):
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1:
+            selected_option = st.selectbox("Select Super Fund", options=dropdown_options)
+        with sc2:
+            s_date = st.date_input("Date Recorded", value=date.today())
+        with sc3:
+            s_value = st.number_input("Balance (AUD)", min_value=0.0)
+        
+        if st.form_submit_button("💾 Save Balance to History", use_container_width=True):
+            if selected_option and s_value > 0:
+                save_super_entry(selected_option, s_date.strftime('%Y-%m-%d'), s_value)
+                st.toast("Balance recorded!")
+                st.rerun()
+
+    if not super_data.empty:
+        st.divider()
+        st.subheader("📊 Visual Growth Trend")
+        # Ensure proper types for plotting
+        super_data['recorded_date'] = pd.to_datetime(super_data['recorded_date'])
+        super_data = super_data.sort_values("recorded_date")
+
+        fig = px.line(super_data, x="recorded_date", y="value_aud", color="super_name", markers=True, template="plotly_white")
+        fig.update_layout(yaxis=dict(tickprefix="$", tickformat=",.2f"), margin=dict(l=0, r=0, t=30, b=0))
+        st.plotly_chart(fig, use_container_width=True)
+        
+        with st.expander("📂 View Full Audit Log"):
+            st.dataframe(super_data.sort_values("recorded_date", ascending=False), use_container_width=True, hide_index=True)

@@ -3,6 +3,12 @@ import sqlite3
 from typing import Dict, List
 import yfinance as yf
 from datetime import datetime
+import base64
+import pdfplumber
+import io
+import re
+import sqlite3
+from datetime import datetime
 
 class DividendCalculator:
     # Default values for fields not provided by yfinance
@@ -71,48 +77,89 @@ class DividendCalculator:
             return date_str
         except Exception:
             return date_str
+   
 
-    def extract_trade_data(self, messages: List[Dict]) -> List[Dict]:
-        """Parses Gmail messages for buy orders and checks against Investment table."""
+    def extract_trade_data(self, messages, service):
+        """Parses CMC Invest PDF attachments for both AU and US buy orders."""
         extracted_data = []
-        trade_pattern = r"buy\s+(\d+)\s+([A-Z]+)\s+at\s+([\d\.]+)\s+([A-Z]+)"
-        date_pattern = r"filled\s+on\s+(\d{2}/\d{2}/\d{4})"
         
-        # Use a single connection for the loop for better performance
+        # --- UPDATED REGEX PATTERNS ---
+        # Ticker: Now allows letters, numbers, and the colon ':' for US stocks
+        ticker_pattern = r"Financial Product\s+([A-Z0-9\:]+)"
+        
+        # Date: Matches 'Transaction Date 20/01/2026'
+        date_pattern = r"Transaction Date\s+(\d{2}/\d{2}/\d{4})"
+        
+        # Quantity & Price: Matches the numeric row at the bottom of the trade table
+        # Format: [Units] [Price with 4 decimals] [Total with $]
+        # Example: '6 68.0000 $408.00' or '1 1203.0000 $1203.00'
+        quant_price_pattern = r"(\d+)\s+(\d+\.\d{4})\s+\$([\d\.,]+)"
+
         conn = sqlite3.connect(self.db_path)
-        
-        for msg in messages:
-            subject = next((h['value'] for h in msg.get('payload', {}).get('headers', []) if h['name'] == 'Subject'), "")
+        newTradesCount = 0
+
+        for msg_meta in messages:
+            msg_id = msg_meta['id']
+            # Fetch full message to access attachments
+            #message = service.users().messages().get(userId='me', id=msg_id).execute()
+            payload = messages.get('payload', {})
+            parts = payload.get('parts', [])
             
-            if "Order filled: BUY" in subject:
-                body = msg.get('snippet', '')
-                trade_match = re.search(trade_pattern, body, re.IGNORECASE)
-                date_match = re.search(date_pattern, body, re.IGNORECASE)
-                
-                if trade_match:
-                    ticker = trade_match.group(2).upper()
-                    units = float(trade_match.group(1))
-                    price = float(trade_match.group(3))
-                    currency = trade_match.group(4)
+            for part in parts:
+                if part.get('filename') and part.get('filename').lower().endswith('.pdf'):
+                    # 1. Download and Decode Attachment
+                    attach_id = part['body'].get('attachmentId')
+                    attachment = service.users().messages().attachments().get(
+                        userId='me', messageId=msg_id, id=attach_id
+                    ).execute()
                     
-                    raw_date = date_match.group(1) if date_match else datetime.now().strftime('%d/%m/%Y')
-                    clean_date = self._normalize_date(raw_date)
+                    data = base64.urlsafe_b64decode(attachment['data'])
+                    pdf_file = io.BytesIO(data)
                     
-                    # Check if exact record exists in Investment table to flag as duplicate
-                    query = "SELECT 1 FROM Investment WHERE Ticker=? AND Units=? AND Purchase_Date=?"
-                    exists = conn.execute(query, (ticker, units, clean_date)).fetchone()
+                    # 2. Extract Text from PDF
+                    with pdfplumber.open(pdf_file) as pdf:
+                        # CMC Confirmations are usually single-page
+                        page_text = pdf.pages[0].extract_text()
                     
-                    extracted_data.append({
-                        "Status": "⚠️ Already Exists" if exists else "✨ New",
-                        "Ticker": ticker,
-                        "Units": units,
-                        "Price": price,
-                        "Currency": currency,
-                        "Date": clean_date
-                    })
-        
+                    # 3. Apply Regex Matching
+                    ticker_match = re.search(ticker_pattern, page_text)
+                    date_match = re.search(date_pattern, page_text)
+                    qp_match = re.search(quant_price_pattern, page_text)
+
+                    if ticker_match and qp_match:
+                        # Clean the ticker (e.g., NVDA:US)
+                        ticker = ticker_match.group(1).upper()
+                        units = float(qp_match.group(1))
+                        price = float(qp_match.group(2))
+                        
+                        # Date Handling
+                        raw_date = date_match.group(1) if date_match else datetime.now().strftime('%d/%m/%Y')
+                        clean_date = self._normalize_date(raw_date)
+                        
+                        # Detect Currency (Optional: Default to AUD if not specified in PDF snippet)
+                        currency = "USD" if ":US" in ticker else "AUD"
+                        
+                        # 4. Duplicate Check
+                        query = "SELECT 1 FROM Investment WHERE Ticker=? AND Units=? AND Purchase_Date=?"
+                        exists = conn.execute(query, (ticker, units, clean_date)).fetchone()
+                        
+                        status = "⚠️ Already Exists" if exists else "✨ New"
+                        if not exists: 
+                            newTradesCount += 1
+                        
+                        extracted_data.append({
+                            "Status": status,
+                            "Ticker": ticker,
+                            "Units": units,
+                            "Price": price,
+                            "Currency": currency,
+                            "Date": clean_date
+                        })
+
         conn.close()
-        return extracted_data[:5]
+        print(f"✅ Extraction Finished: Found {newTradesCount} new trades.")
+        return extracted_data
+
 
     def get_non_ind_tickers(self) -> List[Dict]:
         """Retrieve all non-IND holdings from Investment table."""
@@ -134,7 +181,7 @@ class DividendCalculator:
         return len(result) > 0
 
     def store_dividend(self, ticker: str, payment_date: str, num_shares: int,
-                      dividend_per_unit: float, investment_id: int = None, **kwargs) -> bool:
+                        dividend_per_unit: float, investment_id: int = None, **kwargs) -> bool:
         """Store a single dividend record."""
         values = {**self.DEFAULT_DIVIDEND_VALUES, **kwargs}
         total_dividend = num_shares * dividend_per_unit
@@ -142,13 +189,13 @@ class DividendCalculator:
         self._execute('''
             INSERT INTO dividends 
             (investment_id, ticker, payment_date, num_shares, dividend_per_unit, total_dividend,
-             franked_amount, unfranked_amount, franking_credits, dividends_reinvested,
-             foreign_withholding_tax, holding_type)
+                franked_amount, unfranked_amount, franking_credits, dividends_reinvested,
+                foreign_withholding_tax, holding_type)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (investment_id, ticker, payment_date, num_shares, dividend_per_unit, total_dividend,
-              values['franked_amount'], values['unfranked_amount'],
-              values['franking_credits'], values['dividends_reinvested'],
-              values['foreign_withholding_tax'], values['holding_type']))
+                values['franked_amount'], values['unfranked_amount'],
+                values['franking_credits'], values['dividends_reinvested'],
+                values['foreign_withholding_tax'], values['holding_type']))
         return True
 
     def fetch_dividend_history(self, ticker: str, from_date: str, country: str = 'USA') -> List[Dict]:
