@@ -32,7 +32,7 @@ def init_super_db():
             "super_name" TEXT NOT NULL,
             "recorded_date" DATE NOT NULL,
             "value_aud" REAL NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- PostgreSQL uses TIMESTAMP without length
+            "created_at" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.commit()
