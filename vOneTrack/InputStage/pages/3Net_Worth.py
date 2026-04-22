@@ -188,7 +188,7 @@ if not df_raw.empty:
 
         st.subheader("📊 Consolidated Portfolio Analytics")
         st.dataframe(
-            df.style.applymap(lambda x: f'color: {"#d62728" if x < 0 else "#2ca02c"}; font-weight: bold;', subset=['Profit_AUD', 'Return_Pct']),
+            df.style.map(lambda x: f'color: {"#d62728" if x < 0 else "#2ca02c"}; font-weight: bold;', subset=['Profit_AUD', 'Return_Pct']),
             column_config={
                 "Units": st.column_config.NumberColumn("Units", format="%.0f"),
                 "Live_Price": st.column_config.NumberColumn("Live Price", format="$%.2f"),
