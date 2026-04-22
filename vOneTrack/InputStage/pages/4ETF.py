@@ -1,5 +1,5 @@
 import streamlit as st
-import sqlite3
+import psycopg2
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
@@ -15,22 +15,21 @@ from utils import show_sync_status
 from Portfolio_updater import PortfolioUpdater
 
 # --- 2. CONFIGURATION ---
-DB_PATH = "onetrack.db"
 
 # --- 3. DATA FETCHING FUNCTIONS (Defined BEFORE calling) ---
 def get_consolidated_etf_data():
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(**st.secrets["supabase"])
     query = """
     SELECT 
-        Ticker, 
-        Country, 
-        SUM(Units) as Units, 
-        SUM(Purchase_Value) as Total_Cost_AUD,
-        MAX(Live_Price) as Live_Price,
-        MIN(Purchase_Date) as First_Buy_Date
-    FROM Investment 
-    WHERE Investment_Type = 'ETF'
-    GROUP BY Ticker
+        "Ticker", 
+        "Country", 
+        SUM("Units") as "Units", 
+        SUM("Purchase_Value") as "Total_Cost_AUD",
+        MAX("Live_Price") as "Live_Price",
+        MIN("Purchase_Date") as "First_Buy_Date"
+    FROM "Investment" 
+    WHERE "Investment_Type" = 'ETF'
+    GROUP BY "Ticker", "Country"
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
@@ -50,15 +49,14 @@ def fetch_sparklines(df):
     return df
 
 def get_detailed_etf_rows():
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(**st.secrets["supabase"])
     query = """
-    SELECT 
-        Ticker, Country, Purchase_Date, Units, 
-        Purchase_Price, Purchase_Value as Cost_AUD, 
-        Live_Price, Account_Platform
-    FROM Investment 
-    WHERE Investment_Type = 'ETF'
-    ORDER BY Purchase_Date DESC
+    SELECT "Ticker", "Country", "Purchase_Date", 
+           "Units", "Purchase_Price", "Purchase_Value" as "Cost_AUD", 
+           "Live_Price", "Account_Platform"
+    FROM "Investment" 
+    WHERE "Investment_Type" = 'ETF'
+    ORDER BY "Purchase_Date" DESC
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
@@ -80,7 +78,7 @@ st.caption("Consolidated Performance Metrics with Live AUD Conversion")
 df_raw = get_consolidated_etf_data()
 
 if not df_raw.empty:
-    updater = PortfolioUpdater(DB_PATH)
+    updater = PortfolioUpdater()
     rates = updater.get_live_exchange_rates()
     
     # --- AUD CONVERSION ENGINE ---

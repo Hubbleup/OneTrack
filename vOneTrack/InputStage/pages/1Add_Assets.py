@@ -1,10 +1,12 @@
 import streamlit as st
-import sqlite3
+import psycopg2
 import os
 import sys
 import pandas as pd
 import plotly.express as px
 from datetime import datetime, date
+from sqlalchemy import create_engine
+import urllib.parse
 import re
 
 #Scope for the GmailService
@@ -20,19 +22,17 @@ from googleapi import create_google_service, get_messages_from_sender
 from Calculate_dividend import DividendCalculator
 from Portfolio_updater import PortfolioUpdater 
 
-DB_PATH = os.path.join(parent_dir, "onetrack.db")
-
 # --- 2. DATABASE LOGIC ---
 def init_super_db():
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(**st.secrets["supabase"])
     cursor = conn.cursor()
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS Super_Tracking (
-            row_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            super_name TEXT NOT NULL,
-            recorded_date DATE NOT NULL,
-            value_aud REAL NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        CREATE TABLE IF NOT EXISTS "Super_Tracking" (
+            "row_id" SERIAL PRIMARY KEY,
+            "super_name" TEXT NOT NULL,
+            "recorded_date" DATE NOT NULL,
+            "value_aud" REAL NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP -- PostgreSQL uses TIMESTAMP without length
         )
     """)
     conn.commit()
@@ -41,14 +41,14 @@ def init_super_db():
 def add_investment(ticker, units, price, date, country, currency):
     purchase_value = units * price
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**st.secrets["supabase"])
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT INTO Investment (
-                Ticker, Units, Purchase_Price, Purchase_Value, 
-                Purchase_Date, Country, Currency, Remain_Balance,
-                Live_Price, Live_Value, Capital_Gain_Value, Capital_Gain_Percent, Investment_Type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, 0, 'Equity')
+            INSERT INTO "Investment" (
+                "Ticker", "Units", "Purchase_Price", "Purchase_Value", 
+                "Purchase_Date", "Country", "Currency", "Remain_Balance",
+                "Live_Price", "Live_Value", "Capital_Gain_Value", "Capital_Gain_Percent", "Investment_Type"
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, 0, 0, 'Equity')
         """, (ticker.upper(), units, price, purchase_value, date, country, currency, units))
         conn.commit()
         conn.close()
@@ -97,16 +97,16 @@ def run_sync():
 
 
 def save_super_entry(name, r_date, value):
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(**st.secrets["supabase"])
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO Super_Tracking (super_name, recorded_date, value_aud) VALUES (?, ?, ?)", (name, r_date, value))
+    cursor.execute('INSERT INTO "Super_Tracking" ("super_name", "recorded_date", "value_aud") VALUES (%s, %s, %s)', (name, r_date, value))
     conn.commit()
     conn.close()
 
 def get_super_history():
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(**st.secrets["supabase"])
     try:
-        df = pd.read_sql_query("SELECT * FROM Super_Tracking ORDER BY recorded_date ASC", conn)
+        df = pd.read_sql_query('SELECT * FROM "Super_Tracking" ORDER BY "recorded_date" ASC', conn)
     except:
         df = pd.DataFrame()
     conn.close()
@@ -219,7 +219,7 @@ with tab_trading:
                     # Step 2: Trigger Live Calculation
                     with st.spinner(f"Fetching live price for {ticker.upper()}..."):
                         try:
-                            updater = PortfolioUpdater(DB_PATH)
+                            updater = PortfolioUpdater()
                             updater.refresh_live_prices()
                             st.toast(f"✅ {ticker.upper()} added with Live Data!")
                             st.rerun()
@@ -272,14 +272,24 @@ if 'pending_trades' in st.session_state:
     with col1:
         if st.button("🚀 Import All to Database", type="primary", use_container_width=True):
              try:
+                # URL-encode credentials to handle special characters in passwords
+                user = urllib.parse.quote_plus(st.secrets['supabase']['user'])
+                password = urllib.parse.quote_plus(st.secrets['supabase']['password'])
+                host = st.secrets['supabase']['host']
+                port = st.secrets['supabase']['port']
+                database = st.secrets['supabase']['database']
+                
+                db_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+                engine = create_engine(db_url)
+
                 # Step 1: Batch Save CSV data
-                conn = sqlite3.connect(DB_PATH)
-                df_pending.to_sql('Investment', conn, if_exists='append', index=False)
-                conn.close()
+                with engine.connect() as conn:
+                    # Use correct case for 'Investment'
+                    df_pending.to_sql('Investment', conn, if_exists='append', index=False, schema='public')
                 
                 # Step 2: Batch Refresh all prices (Replaces 0.0s with real numbers)
                 with st.spinner("Synchronising with Market Data..."):
-                    updater = PortfolioUpdater(DB_PATH)
+                    updater = PortfolioUpdater()
                     updater.refresh_live_prices()
                     
                 st.toast("✅ All trades imported and prices updated!")

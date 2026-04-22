@@ -1,12 +1,12 @@
-import sqlite3
+import psycopg2
 import pandas as pd
+import streamlit as st
 from googleapi import create_google_service
 from Portfolio_updater import PortfolioUpdater
 
 # --- CONFIGURATION (Based on your Sheet & DB) ---
 SPREADSHEET_ID = "1BvR7zrAO6JBraoS_jNsmiO6KHnPSbvTzJZJTCPBEg-8"
 RANGE_NAME = "'From CSV'!A2:F500" 
-DB_PATH = "onetrack.db"
 
 def sync_broker_sheet_to_sqlite():
     """
@@ -34,7 +34,7 @@ def sync_broker_sheet_to_sqlite():
             return False, "No data found in 'From CSV' tab."
 
         # 3. DATABASE CONNECTION
-        conn = sqlite3.connect(DB_PATH)
+        conn = psycopg2.connect(**st.secrets["supabase"])
         cursor = conn.cursor()
 
         import_count = 0
@@ -54,10 +54,8 @@ def sync_broker_sheet_to_sqlite():
                 p_value = float(clean(row[5]))  # 'Consideration'
 
                 # DUPLICATE CHECK (Ticker + Date + Units)
-                cursor.execute("""
-                    SELECT 1 FROM Investment 
-                    WHERE Ticker = ? AND Purchase_Date = ? AND Units = ?
-                """, (ticker, p_date, units))
+                cursor.execute('SELECT 1 FROM "Investment" WHERE "Ticker" = %s AND "Purchase_Date" = %s AND "Units" = %s', 
+                               (ticker, p_date, units))
                 
                 if cursor.fetchone():
                     skipped_count += 1
@@ -70,10 +68,10 @@ def sync_broker_sheet_to_sqlite():
                 # 4. INSERT INTO DB
                 # Initially setting Live Price/Value to Purchase Price/Value
                 cursor.execute("""
-                    INSERT INTO Investment (
-                        Ticker, Purchase_Date, Units, Purchase_Price, Purchase_Value, 
-                        Remain_Balance, Live_Price, Live_Value, Country, Currency
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO "Investment" (
+                        "Ticker", "Purchase_Date", "Units", "Purchase_Price", "Purchase_Value", 
+                        "Remain_Balance", "Live_Price", "Live_Value", "Country", "Currency"
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """, (
                     ticker, p_date, units, p_price, p_value, 
                     units, p_price, p_value, country, currency
@@ -89,7 +87,7 @@ def sync_broker_sheet_to_sqlite():
 
         # 5. TRIGGER AUTOMATIC PRICE REFRESH
         print("🔄 Fetching latest market prices...")
-        updater = PortfolioUpdater(DB_PATH)
+        updater = PortfolioUpdater()
         updater.refresh_live_prices()
 
         return True, f"✅ Imported {import_count} new trades, skipped {skipped_count} duplicates."

@@ -1,5 +1,5 @@
 import streamlit as st
-import sqlite3
+import psycopg2
 import pandas as pd
 import plotly.express as px
 import yfinance as yf
@@ -8,27 +8,26 @@ import os
 from Calculate_dividend import DividendCalculator
 
 # --- 1. CONFIGURATION ---
-DB_PATH = "/Users/nawinprabhujayaraman/Nawin/projects/OneTrack/vOneTrack/InputStage/onetrack.db"
+DB_PATH = None # No longer needed for SQLite
 
 # --- 2. INITIALIZE LOGIC ---
-calc = DividendCalculator(DB_PATH)
+calc = DividendCalculator()
 
 class DividendVisualizer:
-    def __init__(self, db_path):
-        self.db_path = db_path
+    def __init__(self):
+        pass
 
     def _get_connection(self):
-        return sqlite3.connect(self.db_path)
+        return psycopg2.connect(**st.secrets["supabase"])
 
     def get_time_logic(self, choice: str):
         if choice == 'Y':
-            return "strftime('%Y', payment_date)", "Yearly"
+            return "to_char(payment_date::date, 'YYYY')", "Yearly"
         elif choice == 'H':
-            return ("strftime('%Y', payment_date) || '-H' || "
-                    "(CASE WHEN strftime('%m', payment_date) <= '06' THEN '1' ELSE '2' END)"), "Half-Yearly"
+            return ("to_char(payment_date::date, 'YYYY') || "
+                    "(CASE WHEN extract(month from payment_date::date) <= 6 THEN '-H1' ELSE '-H2' END)"), "Half-Yearly"
         else:
-            return ("strftime('%Y', payment_date) || '-Q' || "
-                    "((strftime('%m', payment_date) - 1) / 3 + 1)"), "Quarterly"
+            return "to_char(payment_date::date, 'YYYY-\"Q\"Q')", "Quarterly"
 
     def parse_input(self, user_input):
         parts = user_input.strip().split()
@@ -47,24 +46,24 @@ class DividendVisualizer:
         if tickers:
             ticker_list = [t.strip().upper() for t in tickers.split() if t.strip()]
             ticker_str = "','".join(ticker_list)
-            where_clause += f" AND Ticker IN ('{ticker_str}')"
+            where_clause += f" AND \"ticker\" IN ('{ticker_str}')"
 
-        query = f"SELECT ticker AS Ticker, {group_sql} AS Period, SUM(total_dividend) AS Earnings " \
-                f"FROM Dividends {where_clause} GROUP BY Ticker, Period ORDER BY payment_date ASC;"
+        query = f"SELECT \"ticker\" AS \"Ticker\", {group_sql} AS \"Period\", SUM(\"total_dividend\") AS \"Earnings\" " \
+                f"FROM \"Dividends\" {where_clause} GROUP BY \"ticker\", \"Period\" ORDER BY MIN(\"payment_date\") ASC;"
         with self._get_connection() as conn:
             return pd.read_sql_query(query, conn)
         
     def fetch_recent_payments(self, limit=5):
-        query = f"SELECT ticker AS Ticker, payment_date AS 'Pay Date', num_shares AS Shares, " \
-                f"dividend_per_unit AS 'Per Share', total_dividend AS Total FROM Dividends " \
-                f"ORDER BY payment_date DESC LIMIT {limit};"
+        query = f"SELECT \"ticker\" AS \"Ticker\", \"payment_date\" AS \"Pay Date\", \"num_shares\" AS \"Shares\", " \
+                f"\"dividend_per_unit\" AS \"Per Share\", \"total_dividend\" AS \"Total\" FROM \"Dividends\" " \
+                f"ORDER BY \"payment_date\" DESC LIMIT {limit};"
         with self._get_connection() as conn:
             return pd.read_sql_query(query, conn)
             
     def update_dividend_data(self):
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT Ticker, Country FROM Investment")
+            cursor.execute('SELECT DISTINCT "Ticker", "Country" FROM "Investment"')
             stocks = cursor.fetchall()
             updated_count = 0
             for ticker, country in stocks:
@@ -85,7 +84,7 @@ class DividendVisualizer:
                     annual_rate = info.get('dividendRate', 0)
                     ex_date = info.get('exDividendDate', None)
                     if annual_rate > 0:
-                        cursor.execute("UPDATE Investment SET Dividend_Yield = ?, Annual_Dividend = ?, Last_Ex_Date = ? WHERE Ticker = ?", 
+                        cursor.execute('UPDATE "Investment" SET "Dividend_Yield" = %s, "Annual_Dividend" = %s, "Last_Ex_Date" = %s WHERE "Ticker" = %s', 
                                        (div_yield, annual_rate, ex_date, ticker))
                         updated_count += 1
                 except Exception as e:
@@ -94,15 +93,17 @@ class DividendVisualizer:
             return updated_count
 
     def get_total_paid(self):
-        query = "SELECT SUM(total_dividend) FROM Dividends"
+        query = 'SELECT SUM("total_dividend") FROM "Dividends"'
         with self._get_connection() as conn:
-            result = conn.execute(query).fetchone()
-            return result[0] if result and result[0] else 0.0
+            with conn.cursor() as cur:
+                cur.execute(query)
+                result = cur.fetchone()
+                return float(result[0]) if result and result[0] else 0.0
 
 # --- 3. STREAMLIT UI SETUP ---
 st.set_page_config(page_title="Dividend Tracker", layout="wide")
 st.title("📅 Dividend Income Analytics")
-viz = DividendVisualizer(DB_PATH)
+viz = DividendVisualizer()
 
 # --- 4. ACTION SECTION ---
 st.divider()
@@ -136,7 +137,7 @@ with m_col1:
 with m_col2:
     try:
         with viz._get_connection() as conn:
-            forecast_df = pd.read_sql_query("SELECT (Units * Annual_Dividend) as Annual_Income FROM Investment WHERE Annual_Dividend > 0 AND Units > 0", conn)
+            forecast_df = pd.read_sql_query('SELECT ("Units" * "Annual_Dividend") as "Annual_Income" FROM "Investment" WHERE "Annual_Dividend" > 0 AND "Units" > 0', conn)
         total_forecast = forecast_df['Annual_Income'].sum() if not forecast_df.empty else 0.0
         st.metric(label="🔮 Est. Forward Income (Next 12m)", value=f"${total_forecast:,.2f}")
     except:
@@ -146,7 +147,8 @@ with m_col2:
 st.subheader("📢 Current Yields & Announcements")
 try:
     with viz._get_connection() as conn:
-        yield_df = pd.read_sql_query("SELECT Ticker, Dividend_Yield as 'Yield %', Annual_Dividend as 'Div/Share', date(Last_Ex_Date, 'unixepoch') as 'Last Ex-Date' FROM Investment WHERE Annual_Dividend > 0", conn)
+        # Postgres TO_TIMESTAMP for unix epoch
+        yield_df = pd.read_sql_query('SELECT "Ticker", "Dividend_Yield" as "Yield %", "Annual_Dividend" as "Div/Share", TO_TIMESTAMP("Last_Ex_Date")::date as "Last Ex-Date" FROM "Investment" WHERE "Annual_Dividend" > 0', conn)
         st.dataframe(yield_df, use_container_width=True, hide_index=True)
 except:
     st.info("No announcement data found. Run 'Update Yields' to fetch.")

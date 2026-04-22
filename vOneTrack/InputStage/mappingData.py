@@ -1,6 +1,7 @@
 # mappingdata.py
-import sqlite3
+import psycopg2
 import os
+import streamlit as st
 from sheet_reader import get_specific_tabs_data
 
 # 1. Define the specific tabs you want to read
@@ -10,13 +11,12 @@ my_tabs = ["ETFs", "Stocks", "US Stocks", "Managed Funds"]
 tabs_data = get_specific_tabs_data(my_tabs)
 
 # 3. Database setup (using the absolute path we verified)
-db_path = "/Users/nawinprabhujayaraman/Nawin/projects/OneTrack/vOneTrack/InputStage/onetrack.db"
-
-if not os.path.exists(db_path):
-    print(f"❌ Database not found at {db_path}")
-else:
-    conn = sqlite3.connect(db_path)
+try:
+    conn = psycopg2.connect(**st.secrets["supabase"])
     cursor = conn.cursor()
+except Exception as e:
+    print(f"❌ Connection Error: {e}")
+    exit()
 
     
     # mappingdata.py (inside the for tab_name, rows in tabs_data.items(): loop)
@@ -75,17 +75,19 @@ for tab_name, rows in tabs_data.items():
 
     # 5. Update your SQL Query for 16 columns (16 '?' marks)
     query = """
-        INSERT INTO Investment (
-            Ticker, Purchase_Date, Units, Purchase_Price, Brokerage, 
-            Sold_Units, Purchase_Value, Live_Price, Live_Value, 
-            Capital_Gain_Value, Capital_Gain_Percent, Remain_Balance, FIFO_CG,
-            Account_platform, Currency, Country, Investment_Type
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO "Investment" (
+            "Ticker", "Purchase_Date", "Units", "Purchase_Price", "Brokerage", 
+            "Sold_Units", "Purchase_Value", "Live_Price", "Live_Value", 
+            "Capital_Gain_Value", "Capital_Gain_Percent", "Remain_Balance", "FIFO_CG",
+            "Account_Platform", "Currency", "Country", "Investment_Type"
+        ) VALUES %s
     """
     
     try:
         if cleaned_rows:
-            cursor.executemany(query, cleaned_rows)
+            from psycopg2.extras import execute_values
+            # execute_values manages the placeholders automatically
+            execute_values(cursor, query, cleaned_rows)
             print(f"💾 Saved {len(cleaned_rows)} rows from '{tab_name}'")
     except Exception as e:
         print(f"❌ Error saving '{tab_name}': {e}")

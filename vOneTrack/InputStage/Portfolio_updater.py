@@ -1,4 +1,4 @@
-import sqlite3
+import psycopg2
 from time import time
 import yfinance as yf
 import os
@@ -6,27 +6,20 @@ import pandas as pd
 import streamlit as st
 
 class PortfolioUpdater:
-    def __init__(self, db_path):
-        self.db_path = db_path
-        if not os.path.exists(self.db_path):
-            raise FileNotFoundError(f"Database not found at {self.db_path}")
+    def __init__(self):
+        pass
 
     def _get_connection(self):
-        return sqlite3.connect(self.db_path)
+        return psycopg2.connect(**st.secrets["supabase"])
 
     def refresh_live_prices(self):
-        conn = self._get_connection()
-        cursor = conn.cursor()
-       
-        # 1. Fetch unique tickers and countries
-        cursor.execute("""SELECT DISTINCT Ticker, Country 
-        FROM Investment 
-        WHERE Remain_Balance IS NOT NULL 
-          AND Remain_Balance > 0""")  # Only update active investments
-        db_rows = cursor.fetchall()
-        if not db_rows:
-            conn.close()
-            return
+        with self._get_connection() as conn:
+            with conn.cursor() as cursor:
+                # 1. Fetch unique tickers and countries
+                cursor.execute('SELECT DISTINCT "Ticker", "Country" FROM "Investment" WHERE "Remain_Balance" > 0') 
+                db_rows = cursor.fetchall()
+            if not db_rows:
+                return
 
         # 2. Build Ticker Mapping for Yahoo Finance
         symbols = []
@@ -50,30 +43,24 @@ class PortfolioUpdater:
                 prices = data['Close'].ffill().iloc[-1].to_dict()
         except Exception as e:
             print(f"❌ Market Fetch Error: {e}")
-            conn.close()
             return
 
-        # 3. Update Database (Handling NULLs with COALESCE)
-        for ticker, yahoo_sym in ticker_to_yahoo.items():
-            current_price = prices.get(yahoo_sym)
-            
-            if current_price and not pd.isna(current_price):
-                # COALESCE(column, default) prevents the 'Multiplication by NULL' error
-                cursor.execute("""
-                    UPDATE Investment 
-                    SET Live_Price = ?, 
-                        Live_Value = (? * Units * COALESCE(Exchange_Rate, 1.0)),
-                        Capital_Gain_Value = (? * Units * COALESCE(Exchange_Rate, 1.0)) - Purchase_Value,
-                        Capital_Gain_Percent = (
-                            ((? * Units * COALESCE(Exchange_Rate, 1.0)) - Purchase_Value) / 
-                            NULLIF(Purchase_Value, 0)
-                        ) * 100
-                    WHERE Ticker = ?
-                        AND Remain_Balance > 0
-                """, (current_price, current_price, current_price, current_price, ticker))
-
-        conn.commit()
-        conn.close()
+        # 3. Update Database
+        with self._get_connection() as conn:
+            with conn.cursor() as cursor:
+                for ticker, yahoo_sym in ticker_to_yahoo.items():
+                    current_price = prices.get(yahoo_sym)
+                    
+                    if current_price and not pd.isna(current_price):
+                        cursor.execute("""
+                            UPDATE "Investment" 
+                            SET "Live_Price" = %s, 
+                                "Live_Value" = (%s * "Units" * COALESCE("Exchange_Rate", 1.0)),
+                                "Capital_Gain_Value" = (%s * "Units" * COALESCE("Exchange_Rate", 1.0)) - "Purchase_Value",
+                                "Capital_Gain_Percent" = (((%s * "Units" * COALESCE("Exchange_Rate", 1.0)) - "Purchase_Value") / NULLIF("Purchase_Value", 0)) * 100
+                            WHERE "Ticker" = %s AND "Remain_Balance" > 0
+                        """, (float(current_price), float(current_price), float(current_price), float(current_price), ticker))
+            conn.commit()
 
 
 

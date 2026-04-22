@@ -1,12 +1,13 @@
 from datetime import datetime
-import sqlite3
+import psycopg2
+import streamlit as st
 import pandas as pd
 from googleapi import create_google_service
 
 def get_all_investment_data():
-    conn = sqlite3.connect("onetrack.db")
-    # Fetching all columns from the Investment table
-    df = pd.read_sql_query("SELECT * FROM Investment", conn)
+    conn = psycopg2.connect(**st.secrets["supabase"])
+    # Fetching from Supabase 'Investment' table
+    df = pd.read_sql_query('SELECT * FROM "Investment"', conn)
     conn.close()
     return df
 

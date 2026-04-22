@@ -1,5 +1,5 @@
 import streamlit as st
-import sqlite3
+import psycopg2
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -14,8 +14,6 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
-DB_PATH = "onetrack.db"
-
 # Internal Imports
 from Portfolio_updater import PortfolioUpdater 
 from uploadtoGSfromDB import upload_db_to_sheet
@@ -23,7 +21,7 @@ from utils import show_sync_status
 
 # --- 2. BACKGROUND SYNC ENGINE ---
 if 'sync_started' not in st.session_state:
-    updater = PortfolioUpdater(DB_PATH)
+    updater = PortfolioUpdater()
     # daemon=True ensures the thread closes when the app stops
     thread = threading.Thread(target=updater.run_continuous_sync, args=(300,), daemon=True)
     thread.start()
@@ -52,14 +50,14 @@ def get_portfolio_with_history(df):
 
 def get_investment_data():
     """Aggregates investment data from SQLite."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(**st.secrets["supabase"])
     query = """
-    SELECT Ticker, Country, SUM(Units) as Units, SUM(Purchase_Value) as Total_Cost_AUD,
-           MAX(Live_Price) as Live_Price, MIN(Purchase_Date) as Oldest_Purchase,
-           MAX(Purchase_Date) as Newest_Purchase
-    FROM Investment 
-    WHERE Remain_Balance > 0 OR Remain_Balance IS NULL
-    GROUP BY Ticker, Country
+    SELECT "Ticker", "Country", SUM("Units") as "Units", SUM("Purchase_Value") as "Total_Cost_AUD",
+           MAX("Live_Price") as "Live_Price", MIN("Purchase_Date") as "Oldest_Purchase",
+           MAX("Purchase_Date") as "Newest_Purchase"
+    FROM "Investment" 
+    WHERE "Remain_Balance" > 0 OR "Remain_Balance" IS NULL
+    GROUP BY "Ticker", "Country"
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
@@ -67,12 +65,12 @@ def get_investment_data():
 
 def get_latest_super_balance():
     """Fetches the most recent balance for each super fund."""
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(**st.secrets["supabase"])
     try:
         query = """
-        SELECT SUM(value_aud) as Total_Super FROM (
-            SELECT value_aud, ROW_NUMBER() OVER (PARTITION BY super_name ORDER BY recorded_date DESC) as rn
-            FROM Super_Tracking
+        SELECT SUM(value_aud) as "Total_Super" FROM (
+            SELECT "value_aud", ROW_NUMBER() OVER (PARTITION BY "super_name" ORDER BY "recorded_date" DESC) as rn
+            FROM "Super_Tracking"
         ) WHERE rn = 1
         """
         df = pd.read_sql_query(query, conn)
@@ -84,12 +82,12 @@ def get_latest_super_balance():
 
 # --- 5. PLOTTING & DISPLAY FUNCTIONS ---
 
-def plot_ticker_performance(ticker, country, db_path):
+def plot_ticker_performance(ticker, country):
     """Generates the 'Journey' chart showing price trend and purchase points."""
-    conn = sqlite3.connect(db_path)
+    conn = psycopg2.connect(**st.secrets["supabase"])
     trades = pd.read_sql(
-        f"SELECT Purchase_Date, Purchase_Price, Units FROM Investment WHERE Ticker='{ticker}' ORDER BY Purchase_Date ASC", 
-        conn
+        'SELECT "Purchase_Date", "Purchase_Price", "Units" FROM "Investment" WHERE "Ticker"=%s ORDER BY "Purchase_Date" ASC', 
+        conn, params=(ticker,)
     )
     conn.close()
 
@@ -123,7 +121,7 @@ def plot_ticker_performance(ticker, country, db_path):
 def show_performance_summary(df):
     """Displays the regional subtotal and net worth table."""
     st.subheader("🏢 Regional Performance Summary (in AUD)")
-    updater = PortfolioUpdater(DB_PATH)
+    updater = PortfolioUpdater()
     rates = updater.get_live_exchange_rates()
     
     df['Rate'] = df['Country'].map(rates).fillna(1.0)
@@ -219,7 +217,7 @@ if not df_raw.empty:
             ticker_info = df_raw[df_raw['Ticker'] == selected].iloc[0]
             
             with st.spinner(f"Fetching journey for {selected}..."):
-                fig = plot_ticker_performance(selected, ticker_info['Country'], DB_PATH)
+                fig = plot_ticker_performance(selected, ticker_info['Country'])
             
             if fig:
                 st.plotly_chart(fig, use_container_width=True)

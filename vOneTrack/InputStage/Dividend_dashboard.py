@@ -1,29 +1,26 @@
-import sqlite3
-import os
+import psycopg2
+import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
 import sys
 
 class DividendVisualizer:
-    def __init__(self, db_path):
-        self.db_path = os.path.abspath(db_path)
-        if not os.path.exists(self.db_path):
-            raise FileNotFoundError(f"Database not found at {self.db_path}")
+    def __init__(self):
+        pass
 
     def _get_connection(self):
-        return sqlite3.connect(self.db_path)
+        return psycopg2.connect(**st.secrets["supabase"])
 
     def get_time_logic(self, choice: str):
         """Maps frequency code to SQL grouping logic."""
         if choice == 'Y':
-            return "strftime('%Y', payment_date)", "Yearly"
+            return "to_char(payment_date::date, 'YYYY')", "Yearly"
         elif choice == 'H':
-            return ("strftime('%Y', payment_date) || '-H' || "
-                    "(CASE WHEN strftime('%m', payment_date) <= '06' THEN '1' ELSE '2' END)"), "Half-Yearly"
+            return ("to_char(payment_date::date, 'YYYY') || "
+                    "(CASE WHEN extract(month from payment_date::date) <= 6 THEN '-H1' ELSE '-H2' END)"), "Half-Yearly"
         else:
-            return ("strftime('%Y', payment_date) || '-Q' || "
-                    "((strftime('%m', payment_date) - 1) / 3 + 1)"), "Quarterly"
+            return "to_char(payment_date::date, 'YYYY-\"Q\"Q')", "Quarterly"
 
     def parse_input(self, user_input):
         """Extracts tickers and frequency from a single input string."""
@@ -48,23 +45,23 @@ class DividendVisualizer:
         if tickers:
             ticker_list = [t.strip().upper() for t in tickers.split() if t.strip()]
             ticker_str = "','".join(ticker_list)
-            where_clause += f" AND Ticker IN ('{ticker_str}')"
+            where_clause += f" AND \"ticker\" IN ('{ticker_str}')"
 
         query = f"""
         SELECT 
-            ticker AS Ticker,
+            \"ticker\" AS \"Ticker\",
             {group_sql} AS Period,
-            SUM(total_dividend) AS Earnings
-        FROM Dividends
+            SUM(\"total_dividend\") AS Earnings
+        FROM \"Dividends\"
         {where_clause}
-        GROUP BY Ticker, Period
-        ORDER BY payment_date ASC;
+        GROUP BY \"Ticker\", Period
+        ORDER BY MIN(payment_date) ASC;
         """
         with self._get_connection() as conn:
             return pd.read_sql_query(query, conn)
 
     def run_dashboard(self):
-        print(f"\n📊 Database: {self.db_path}")
+        print("\n📊 Connected to Supabase")
         print("Usage examples: 'AAPL, MSFT H', 'TSLA', 'Q' (for all)")
         
         user_raw = input("Enter Tickers and/or Frequency: ").strip()
@@ -105,7 +102,7 @@ if __name__ == "__main__":
     DB_PATH = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DB
 
     try:
-        viz = DividendVisualizer(DB_PATH)
+        viz = DividendVisualizer()
         viz.run_dashboard()
     except Exception as e:
         print(f"❌ Error: {e}")

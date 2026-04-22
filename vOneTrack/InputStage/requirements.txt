@@ -1,0 +1,10 @@
+streamlit
+psycopg2-binary
+sqlalchemy
+pandas
+plotly
+yfinance
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib
+pdfplumber

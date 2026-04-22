@@ -17,7 +17,7 @@ def show_sync_status():
         
         # Manual Force Refresh Button
         if st.button("⚡ Force Refresh Now"):
-            updater = PortfolioUpdater("onetrack.db")
+            updater = PortfolioUpdater()
             with st.spinner("Updating..."):
                 updater.refresh_live_prices()
             st.rerun()

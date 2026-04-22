@@ -1,13 +1,13 @@
 import re
-import sqlite3
+import psycopg2
+from psycopg2 import extras
+import streamlit as st
 from typing import Dict, List
 import yfinance as yf
 from datetime import datetime
 import base64
 import pdfplumber
 import io
-import re
-import sqlite3
 from datetime import datetime
 
 class DividendCalculator:
@@ -21,35 +21,37 @@ class DividendCalculator:
         'holding_type': None
     }
 
-    def __init__(self, db_path: str = "onetrack.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None):
+        # db_path ignored in favor of Supabase secrets
         self.init_database()
+
+    def _get_connection(self):
+        return psycopg2.connect(**st.secrets["supabase"])
 
     def _query(self, sql: str, params: tuple = ()) -> List[tuple]:
         """Helper: Execute query and return results."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute(sql, params)
-        result = cursor.fetchall()
-        conn.close()
-        return result
+        with self._get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, params)
+                return cursor.fetchall()
 
     def _execute(self, sql: str, params: tuple = ()) -> None:
         """Helper: Execute query and commit (for INSERT/UPDATE/DELETE)."""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        cursor.execute(sql, params)
-        conn.commit()
-        conn.close()
+        with self._get_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, params)
+            conn.commit()
 
     def init_database(self):
         """Create dividend table if it doesn't exist."""
+        # PostgreSQL uses SERIAL instead of AUTOINCREMENT
+        # payment_date should ideally be DATE type in Postgres, but keeping TEXT/VARCHAR for compatibility
         self._execute('''
-            CREATE TABLE IF NOT EXISTS Dividends (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
+            CREATE TABLE IF NOT EXISTS "Dividends" (
+                id SERIAL PRIMARY KEY,
                 investment_id INTEGER,
                 ticker TEXT NOT NULL,
-                payment_date TEXT NOT NULL,
+                "payment_date" TEXT NOT NULL,
                 num_shares INTEGER NOT NULL,
                 dividend_per_unit REAL NOT NULL,
                 total_dividend REAL NOT NULL,
@@ -60,7 +62,7 @@ class DividendCalculator:
                 foreign_withholding_tax REAL DEFAULT 0,
                 holding_type TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (investment_id) REFERENCES Investment(id)
+                FOREIGN KEY (investment_id) REFERENCES "Investment"(id)
             )
         ''')
 
@@ -95,68 +97,68 @@ class DividendCalculator:
         # Example: '6 68.0000 $408.00' or '1 1203.0000 $1203.00'
         quant_price_pattern = r"(\d+)\s+(\d+\.\d{4})\s+\$([\d\.,]+)"
 
-        conn = sqlite3.connect(self.db_path)
         newTradesCount = 0
 
-        for msg_meta in messages:
-            msg_id = msg_meta['id']
-            # Fetch full message to access attachments
-            #message = service.users().messages().get(userId='me', id=msg_id).execute()
-            payload = messages.get('payload', {})
-            parts = payload.get('parts', [])
-            
-            for part in parts:
-                if part.get('filename') and part.get('filename').lower().endswith('.pdf'):
-                    # 1. Download and Decode Attachment
-                    attach_id = part['body'].get('attachmentId')
-                    attachment = service.users().messages().attachments().get(
-                        userId='me', messageId=msg_id, id=attach_id
-                    ).execute()
-                    
-                    data = base64.urlsafe_b64decode(attachment['data'])
-                    pdf_file = io.BytesIO(data)
-                    
-                    # 2. Extract Text from PDF
-                    with pdfplumber.open(pdf_file) as pdf:
-                        # CMC Confirmations are usually single-page
-                        page_text = pdf.pages[0].extract_text()
-                    
-                    # 3. Apply Regex Matching
-                    ticker_match = re.search(ticker_pattern, page_text)
-                    date_match = re.search(date_pattern, page_text)
-                    qp_match = re.search(quant_price_pattern, page_text)
+        with self._get_connection() as conn:
+            for msg_meta in messages:
+                msg_id = msg_meta['id']
+                # Fetch full message to access attachments
+                #message = service.users().messages().get(userId='me', id=msg_id).execute()
+                payload = messages.get('payload', {})
+                parts = payload.get('parts', [])
+                
+                for part in parts:
+                    if part.get('filename') and part.get('filename').lower().endswith('.pdf'):
+                        # 1. Download and Decode Attachment
+                        attach_id = part['body'].get('attachmentId')
+                        attachment = service.users().messages().attachments().get(
+                            userId='me', messageId=msg_id, id=attach_id
+                        ).execute()
+                        
+                        data = base64.urlsafe_b64decode(attachment['data'])
+                        pdf_file = io.BytesIO(data)
+                        
+                        # 2. Extract Text from PDF
+                        with pdfplumber.open(pdf_file) as pdf:
+                            # CMC Confirmations are usually single-page
+                            page_text = pdf.pages[0].extract_text()
+                        
+                        # 3. Apply Regex Matching
+                        ticker_match = re.search(ticker_pattern, page_text)
+                        date_match = re.search(date_pattern, page_text)
+                        qp_match = re.search(quant_price_pattern, page_text)
 
-                    if ticker_match and qp_match:
-                        # Clean the ticker (e.g., NVDA:US)
-                        ticker = ticker_match.group(1).upper()
-                        units = float(qp_match.group(1))
-                        price = float(qp_match.group(2))
-                        
-                        # Date Handling
-                        raw_date = date_match.group(1) if date_match else datetime.now().strftime('%d/%m/%Y')
-                        clean_date = self._normalize_date(raw_date)
-                        
-                        # Detect Currency (Optional: Default to AUD if not specified in PDF snippet)
-                        currency = "USD" if ":US" in ticker else "AUD"
-                        
-                        # 4. Duplicate Check
-                        query = "SELECT 1 FROM Investment WHERE Ticker=? AND Units=? AND Purchase_Date=?"
-                        exists = conn.execute(query, (ticker, units, clean_date)).fetchone()
-                        
-                        status = "⚠️ Already Exists" if exists else "✨ New"
-                        if not exists: 
-                            newTradesCount += 1
-                        
-                        extracted_data.append({
-                            "Status": status,
-                            "Ticker": ticker,
-                            "Units": units,
-                            "Price": price,
-                            "Currency": currency,
-                            "Date": clean_date
-                        })
-
-        conn.close()
+                        if ticker_match and qp_match:
+                            # Clean the ticker (e.g., NVDA:US)
+                            ticker = ticker_match.group(1).upper()
+                            units = float(qp_match.group(1))
+                            price = float(qp_match.group(2))
+                            
+                            # Date Handling
+                            raw_date = date_match.group(1) if date_match else datetime.now().strftime('%d/%m/%Y')
+                            clean_date = self._normalize_date(raw_date)
+                            
+                            # Detect Currency (Optional: Default to AUD if not specified in PDF snippet)
+                            currency = "USD" if ":US" in ticker else "AUD"
+                            
+                            # 4. Duplicate Check
+                            query = 'SELECT 1 FROM "Investment" WHERE "Ticker"=%s AND "Units"=%s AND "Purchase_Date"=%s'
+                            with conn.cursor() as cur:
+                                cur.execute(query, (ticker, units, clean_date))
+                                exists = cur.fetchone()
+                            
+                            status = "⚠️ Already Exists" if exists else "✨ New"
+                            if not exists: 
+                                newTradesCount += 1
+                            
+                            extracted_data.append({
+                                "Status": status,
+                                "Ticker": ticker,
+                                "Units": units,
+                                "Price": price,
+                                "Currency": currency,
+                                "Date": clean_date
+                            })
         print(f"✅ Extraction Finished: Found {newTradesCount} new trades.")
         return extracted_data
 
@@ -164,7 +166,7 @@ class DividendCalculator:
     def get_non_ind_tickers(self) -> List[Dict]:
         """Retrieve all non-IND holdings from Investment table."""
         rows = self._query(
-            "SELECT id, Ticker, Units, Country, Purchase_Date FROM Investment WHERE Country <> ?",
+            'SELECT id, "Ticker", "Units", "Country", "Purchase_Date" FROM "Investment" WHERE "Country" <> %s',
             ('IND',)
         )
         return [
@@ -175,7 +177,7 @@ class DividendCalculator:
     def dividend_exists(self, investment_id: int, payment_date: str) -> bool:
         """Check if a dividend record already exists."""
         result = self._query(
-            "SELECT id FROM Dividends WHERE investment_id = ? AND payment_date = ?",
+            'SELECT id FROM "Dividends" WHERE investment_id = %s AND payment_date = %s',
             (investment_id, payment_date)
         )
         return len(result) > 0
@@ -187,11 +189,11 @@ class DividendCalculator:
         total_dividend = num_shares * dividend_per_unit
 
         self._execute('''
-            INSERT INTO dividends 
+            INSERT INTO "Dividends" 
             (investment_id, ticker, payment_date, num_shares, dividend_per_unit, total_dividend,
                 franked_amount, unfranked_amount, franking_credits, dividends_reinvested,
                 foreign_withholding_tax, holding_type)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', (investment_id, ticker, payment_date, num_shares, dividend_per_unit, total_dividend,
                 values['franked_amount'], values['unfranked_amount'],
                 values['franking_credits'], values['dividends_reinvested'],
@@ -241,12 +243,12 @@ class DividendCalculator:
     def sync_new_dividends_from_db(self) -> Dict[str, int]:
         results = {}
         # 1. Get all holdings from Investment table
-        holdings = self._query("SELECT id, Ticker, Units, Country, Purchase_Date FROM Investment")
+        holdings = self._query('SELECT id, "Ticker", "Units", "Country", "Purchase_Date" FROM "Investment"')
         
         for h_id, ticker, units, country, p_date in holdings:
             # 2. Find the last dividend date we have for this specific investment
             last_record = self._query(
-                "SELECT MAX(payment_date) FROM Dividends WHERE investment_id = ?", (h_id,)
+                'SELECT MAX(payment_date) FROM "Dividends" WHERE investment_id = %s', (h_id,)
             )
             
             # Start searching from the later of: Purchase Date OR Last Recorded Dividend

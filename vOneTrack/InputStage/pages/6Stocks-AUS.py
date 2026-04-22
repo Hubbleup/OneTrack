@@ -1,5 +1,5 @@
 import streamlit as st
-import sqlite3
+import psycopg2
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
@@ -15,21 +15,16 @@ from utils import show_sync_status
 from Portfolio_updater import PortfolioUpdater
 
 # --- 2. CONFIGURATION ---
-DB_PATH = "onetrack.db"
 
 # --- 3. DATA FETCHING ---
 def get_aus_stock_data():
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(**st.secrets["supabase"])
     query = """
-    SELECT 
-        Ticker, 
-        SUM(Units) as Units, 
-        SUM(Purchase_Value) as Total_Cost_AUD,
-        MAX(Live_Price) as Live_Price,
-        MIN(Purchase_Date) as First_Buy_Date
-    FROM Investment 
-    WHERE Country = 'AUS' AND Investment_Type <> 'ETF'
-    GROUP BY Ticker
+    SELECT "Ticker", SUM("Units") as "Units", SUM("Purchase_Value") as "Total_Cost_AUD",
+           MAX("Live_Price") as "Live_Price", MIN("Purchase_Date") as "First_Buy_Date"
+    FROM "Investment" 
+    WHERE "Country" = 'AUS' AND "Investment_Type" <> 'ETF'
+    GROUP BY "Ticker"
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
@@ -54,15 +49,14 @@ def color_metric(val):
     return ''
 
 def get_detailed_aus_stock_rows():
-    conn = sqlite3.connect(DB_PATH)
+    conn = psycopg2.connect(**st.secrets["supabase"])
     query = """
-    SELECT 
-        Ticker, Purchase_Date, Units, 
-        Purchase_Price, Purchase_Value as Cost_AUD, 
-        Live_Price, Account_Platform
-    FROM Investment 
-    WHERE Country = 'AUS' AND Investment_Type <> 'ETF'
-    ORDER BY Purchase_Date DESC
+    SELECT "Ticker", "Purchase_Date", "Units", 
+           "Purchase_Price", "Purchase_Value" as "Cost_AUD", 
+           "Live_Price", "Account_Platform"
+    FROM "Investment" 
+    WHERE "Country" = 'AUS' AND "Investment_Type" <> 'ETF'
+    ORDER BY "Purchase_Date" DESC
     """
     df = pd.read_sql_query(query, conn)
     conn.close()
