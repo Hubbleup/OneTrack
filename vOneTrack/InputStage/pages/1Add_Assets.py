@@ -8,6 +8,7 @@ from datetime import datetime, date
 from sqlalchemy import create_engine
 import urllib.parse
 import re
+from auth import check_auth, logout
 
 #Scope for the GmailService
 default_scope = ['https://www.googleapis.com/auth/gmail.readonly']
@@ -230,6 +231,9 @@ init_db_sequences()
 
 # --- 3. UI CONFIGURATION ---
 st.set_page_config(page_title="Asset Console", layout="wide", page_icon="💹")
+check_auth()
+logout()
+
 st.title("💼 Portfolio Management Console")
 
 # Create Main Tabs

@@ -3,9 +3,14 @@ import psycopg2
 import pandas as pd
 from sqlalchemy import create_engine
 import urllib.parse
+from auth import check_auth, logout
 
 # Set global page config
 st.set_page_config(page_title="OneTrack Hub", page_icon="📈", layout="wide")
+
+# Authentication Check
+check_auth()
+logout() # Add logout button to sidebar
 
 st.title("🛡️ OneTrack Investment Command Centre")
 st.markdown("---")
