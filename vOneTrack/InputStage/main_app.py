@@ -36,3 +36,5 @@ try:
     
     st.info("👈 Use the sidebar to navigate between Add Assets, Dividends, and Net Worth.")
 except Exception as e:
+    st.error(f"An error occurred while loading the dashboard: {e}")
+    st.info("Please check your Supabase connection settings in secrets.toml.")

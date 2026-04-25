@@ -245,7 +245,7 @@ with tab_trading:
             country = st.selectbox("Market Country", ["USA", "AUS", "IND"])
             currency = st.selectbox("Local Currency", ["USD", "AUD", "INR"])
 
-        if st.form_submit_button("🚀 Record Manual Trade", use_container_width=True):
+        if st.form_submit_button("🚀 Record Manual Trade", width='stretch'):
             if ticker and units > 0:
                  # Step 1: Save to DB
                 success = add_investment(ticker, units, price, purchase_date.strftime('%Y-%m-%d'), country, currency)
@@ -277,7 +277,7 @@ if uploaded_file:
     try:
         raw_df = pd.read_csv(uploaded_file)
         
-        if st.button("🛠️ Map & Preview Trades", use_container_width=True):
+        if st.button("🛠️ Map & Preview Trades", width='stretch'):
             # --- ROUTING LOGIC ---
             if broker_choice == "CMC Markets":
                 required = ['AsxCode', 'Trade Date', 'Consideration', 'Exch Rate', 'Avg Price', 'Price', 'Quantity']
@@ -305,7 +305,7 @@ if 'pending_trades' in st.session_state:
     
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🚀 Import All to Database", type="primary", use_container_width=True):
+        if st.button("🚀 Import All to Database", type="primary", width='stretch'):
              try:
                 engine = get_engine()
 
@@ -328,7 +328,7 @@ if 'pending_trades' in st.session_state:
              except Exception as e:
                 st.error(f"Critical Import Error: {e}")
     with col2:
-        if st.button("❌ Clear/Cancel", use_container_width=True):
+        if st.button("❌ Clear/Cancel", width='stretch'):
             del st.session_state['pending_trades']
             st.rerun()
 
@@ -358,7 +358,7 @@ with tab_super:
         with sc3:
             s_value = st.number_input("Balance (AUD)", min_value=0.0)
         
-        if st.form_submit_button("💾 Save Balance to History", use_container_width=True):
+        if st.form_submit_button("💾 Save Balance to History", width='stretch'):
             if selected_option and s_value > 0:
                 if save_super_entry(selected_option, s_date.strftime('%Y-%m-%d'), s_value):
                     st.toast("Balance recorded!")

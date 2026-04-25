@@ -3,6 +3,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from datetime import datetime
+from sqlalchemy import create_engine
+import urllib.parse
 import sys
 
 class DividendVisualizer:
@@ -11,6 +13,16 @@ class DividendVisualizer:
 
     def _get_connection(self):
         return psycopg2.connect(**st.secrets["supabase"])
+
+    def _get_engine(self):
+        """Utility to create a SQLAlchemy engine for pandas compatibility."""
+        user = urllib.parse.quote_plus(st.secrets['supabase']['user'])
+        password = urllib.parse.quote_plus(st.secrets['supabase']['password'])
+        host = st.secrets['supabase']['host']
+        port = st.secrets['supabase']['port']
+        database = st.secrets['supabase']['database']
+        db_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+        return create_engine(db_url)
 
     def get_time_logic(self, choice: str):
         """Maps frequency code to SQL grouping logic."""
@@ -57,8 +69,8 @@ class DividendVisualizer:
         GROUP BY \"Ticker\", Period
         ORDER BY MIN(payment_date) ASC;
         """
-        with self._get_connection() as conn:
-            return pd.read_sql_query(query, conn)
+        engine = self._get_engine()
+        return pd.read_sql_query(query, engine)
 
     def run_dashboard(self):
         print("\n📊 Connected to Supabase")

@@ -3,6 +3,8 @@ import psycopg2
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
+from sqlalchemy import create_engine
+import urllib.parse
 import os
 import sys
 
@@ -17,8 +19,18 @@ from Portfolio_updater import PortfolioUpdater
 # --- 2. CONFIGURATION ---
 
 # --- 3. DATA FETCHING FUNCTIONS (Defined BEFORE calling) ---
+def get_engine():
+    """Utility to create a SQLAlchemy engine to resolve Pandas UserWarnings."""
+    user = urllib.parse.quote_plus(st.secrets['supabase']['user'])
+    password = urllib.parse.quote_plus(st.secrets['supabase']['password'])
+    host = st.secrets['supabase']['host']
+    port = st.secrets['supabase']['port']
+    database = st.secrets['supabase']['database']
+    db_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+    return create_engine(db_url)
+
 def get_consolidated_etf_data():
-    conn = psycopg2.connect(**st.secrets["supabase"])
+    engine = get_engine()
     query = """
     SELECT 
         "Ticker", 
@@ -31,8 +43,7 @@ def get_consolidated_etf_data():
     WHERE "Investment_Type" = 'ETF'
     GROUP BY "Ticker", "Country"
     """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
+    df = pd.read_sql_query(query, engine)
     return df
 
 @st.cache_data(ttl=3600)
@@ -49,7 +60,7 @@ def fetch_sparklines(df):
     return df
 
 def get_detailed_etf_rows():
-    conn = psycopg2.connect(**st.secrets["supabase"])
+    engine = get_engine()
     query = """
     SELECT "Ticker", "Country", "Purchase_Date", 
            "Units", "Purchase_Price", "Purchase_Value" as "Cost_AUD", 
@@ -58,8 +69,7 @@ def get_detailed_etf_rows():
     WHERE "Investment_Type" = 'ETF'
     ORDER BY "Purchase_Date" DESC
     """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
+    df = pd.read_sql_query(query, engine)
     return df  
 
 def color_metric(val):
