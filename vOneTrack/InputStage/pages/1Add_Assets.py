@@ -309,7 +309,7 @@ if uploaded_file:
 if 'pending_trades' in st.session_state:
     df_pending = st.session_state['pending_trades']
     st.write(f"### Review {broker_choice} Trades")
-    st.dataframe(df_pending, use_container_width=True, hide_index=True)
+    st.dataframe(df_pending, width='stretch', hide_index=True)
     
     col1, col2 = st.columns(2)
     with col1:
@@ -381,7 +381,7 @@ with tab_super:
 
         fig = px.line(super_data, x="recorded_date", y="value_aud", color="super_name", markers=True, template="plotly_white")
         fig.update_layout(yaxis=dict(tickprefix="$", tickformat=",.2f"), margin=dict(l=0, r=0, t=30, b=0))
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, width='stretch')
         
         with st.expander("📂 View Full Audit Log"):
-            st.dataframe(super_data.sort_values("recorded_date", ascending=False), use_container_width=True, hide_index=True)
+            st.dataframe(super_data.sort_values("recorded_date", ascending=False), width='stretch', hide_index=True)

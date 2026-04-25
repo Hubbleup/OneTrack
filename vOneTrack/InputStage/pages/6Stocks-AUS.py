@@ -3,6 +3,8 @@ import psycopg2
 import pandas as pd
 import yfinance as yf
 from datetime import datetime
+from sqlalchemy import create_engine
+import urllib.parse
 import os
 import sys
 
@@ -17,8 +19,18 @@ from Portfolio_updater import PortfolioUpdater
 # --- 2. CONFIGURATION ---
 
 # --- 3. DATA FETCHING ---
+def get_engine():
+    """Utility to create a SQLAlchemy engine to resolve Pandas UserWarnings."""
+    user = urllib.parse.quote_plus(st.secrets['supabase']['user'])
+    password = urllib.parse.quote_plus(st.secrets['supabase']['password'])
+    host = st.secrets['supabase']['host']
+    port = st.secrets['supabase']['port']
+    database = st.secrets['supabase']['database']
+    db_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+    return create_engine(db_url)
+
 def get_aus_stock_data():
-    conn = psycopg2.connect(**st.secrets["supabase"])
+    engine = get_engine()
     query = """
     SELECT "Ticker", SUM("Units") as "Units", SUM("Purchase_Value") as "Total_Cost_AUD",
            MAX("Live_Price") as "Live_Price", MIN("Purchase_Date") as "First_Buy_Date"
@@ -26,8 +38,7 @@ def get_aus_stock_data():
     WHERE "Country" = 'AUS' AND "Investment_Type" <> 'ETF'
     GROUP BY "Ticker"
     """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
+    df = pd.read_sql_query(query, engine)
     return df
 
 @st.cache_data(ttl=3600)
@@ -49,7 +60,7 @@ def color_metric(val):
     return ''
 
 def get_detailed_aus_stock_rows():
-    conn = psycopg2.connect(**st.secrets["supabase"])
+    engine = get_engine()
     query = """
     SELECT "Ticker", "Purchase_Date", "Units", 
            "Purchase_Price", "Purchase_Value" as "Cost_AUD", 
@@ -58,8 +69,7 @@ def get_detailed_aus_stock_rows():
     WHERE "Country" = 'AUS' AND "Investment_Type" <> 'ETF'
     ORDER BY "Purchase_Date" DESC
     """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
+    df = pd.read_sql_query(query, engine)
     return df
 
 # --- 4. PAGE UI SETUP ---
@@ -119,7 +129,7 @@ if not df_raw.empty:
             "Current Value AUD", "Total Return AUD ($)", "Total Return (%)", "Est. Return/Year (%)"
         ),
         hide_index=True,
-        use_container_width=True
+        width='stretch'
     )
 
     st.divider()
@@ -144,7 +154,7 @@ if not df_details.empty:
             "Growth_%": st.column_config.NumberColumn("%", format="%.2f%%"),
         },
         column_order=("Ticker", "Purchase_Date", "Units", "Purchase_Price", "Cost_AUD", "Value_AUD", "Profit_AUD", "Growth_%"),
-        hide_index=True, use_container_width=True
+        hide_index=True, width='stretch'
     )
 else:
     st.info("No Australian Stock data found.")

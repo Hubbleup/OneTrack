@@ -139,7 +139,7 @@ if not df_raw.empty:
             "Ticker", "7D Trend", "Units", "Live_Price", "Current Value AUD",  
             "Total Return ($)", "Total Return (%)", "Est. Return/Year (%)"
         ),
-        hide_index=True, use_container_width=True
+        hide_index=True, width='stretch'
     )
 
     # --- DETAILED TRANSACTION HISTORY ---
@@ -166,7 +166,7 @@ if not df_raw.empty:
                 "Growth_%": st.column_config.NumberColumn("%", format="%.2f%%"),
             },
             column_order=("Ticker", "Purchase_Date", "Units", "Purchase_Price", "Cost_AUD", "Value_AUD", "Profit_AUD", "Growth_%"),
-            hide_index=True, use_container_width=True
+            hide_index=True, width='stretch'
         )
 else:
     st.info("No ETF data found.")

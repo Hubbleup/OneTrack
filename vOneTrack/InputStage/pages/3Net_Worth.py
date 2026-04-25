@@ -169,7 +169,7 @@ def show_stacked_growth_bar(df):
     fig.add_trace(go.Bar(x=df_sorted['Ticker'], y=df_sorted['Profit_AUD'], name='Growth', marker_color='#2ca02c',
                         text=df_sorted['Return_Pct'].round(1).astype(str) + "%", textposition='outside'))
     fig.update_layout(barmode='stack', template="plotly_white", yaxis=dict(tickprefix="$"))
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width='stretch')
 
 # --- 6. MAIN EXECUTION & TABS ---
 
@@ -207,7 +207,7 @@ if not df_raw.empty:
                 "Return_Pct": st.column_config.NumberColumn("Return %", format="%.2f%%"),
             },
             column_order=("Ticker", "7D Trend", "Units", "Live_Price", "Value_AUD", "Profit_AUD", "Return_Pct", "Age (Years)"),
-            hide_index=True, use_container_width=True
+            hide_index=True, width='stretch'
         )
         
         show_stacked_growth_bar(df)
@@ -229,7 +229,7 @@ if not df_raw.empty:
                 fig = plot_ticker_performance(selected, ticker_info['Country'])
             
             if fig:
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width='stretch')
             else:
                 st.info(f"Market data for {selected} is currently unavailable.")
 else:
