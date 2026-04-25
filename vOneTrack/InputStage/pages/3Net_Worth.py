@@ -93,12 +93,11 @@ def get_latest_super_balance():
 
 def plot_ticker_performance(ticker, country):
     """Generates the 'Journey' chart showing price trend and purchase points."""
-    conn = psycopg2.connect(**st.secrets["supabase"])
+    engine = get_engine() # Use the SQLAlchemy engine
     trades = pd.read_sql(
         'SELECT "Purchase_Date", "Purchase_Price", "Units" FROM "Investment" WHERE "Ticker"=%s ORDER BY "Purchase_Date" ASC', 
-        conn, params=(ticker,)
+        engine, params=(ticker,)
     )
-    conn.close()
 
     if trades.empty:
         return None

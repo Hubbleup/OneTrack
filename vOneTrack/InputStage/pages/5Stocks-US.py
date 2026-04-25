@@ -60,7 +60,7 @@ def color_metric(val):
     return ''
 
 def get_detailed_us_stock_rows():
-    conn = psycopg2.connect(**st.secrets["supabase"])
+    engine = get_engine() # Initialize engine here
     # Filters for US stocks that are NOT ETFs
     query = """
     SELECT "Ticker", "Purchase_Date", "Units", 
