@@ -159,9 +159,9 @@ with m_col2:
 st.subheader("📢 Current Yields & Announcements")
 try:
     engine = viz._get_engine()
-        # Postgres TO_TIMESTAMP for unix epoch
+    # Postgres TO_TIMESTAMP for unix epoch
     yield_df = pd.read_sql_query('SELECT "Ticker", "Dividend_Yield" as "Yield %", "Annual_Dividend" as "Div/Share", TO_TIMESTAMP("Last_Ex_Date")::date as "Last Ex-Date" FROM "Investment" WHERE "Annual_Dividend" > 0', engine)
-        st.dataframe(yield_df, use_container_width=True, hide_index=True)
+    st.dataframe(yield_df, width='stretch', hide_index=True)
 except:
     st.info("No announcement data found. Run 'Update Yields' to fetch.")
 
