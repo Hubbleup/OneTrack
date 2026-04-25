@@ -67,19 +67,25 @@ def init_db_sequences():
     conn.commit()
     conn.close()
 
-def add_investment(ticker, units, price, date, country, currency):
+def add_investment(ticker, units, price, date, country, currency, inv_type):
     init_db_sequences() # Sync before manual insert
     purchase_value = units * price
+    # Get exchange rate if needed
+    updater = PortfolioUpdater()
+    rates = updater.get_live_exchange_rates()
+    exch_rate = rates.get(country, 1.0)
+
     try:
         conn = psycopg2.connect(**st.secrets["supabase"])
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO "Investment" (
-                "Ticker", "Units", "Purchase_Price", "Purchase_Value", 
-                "Purchase_Date", "Country", "Currency", "Remain_Balance",
+                "Ticker", "Units", "Purchase_Price", "Avg_Purchase_Price", "Purchase_Value", 
+                "Purchase_Date", "Country", "Currency", "Exchange_Rate", "Remain_Balance",
+                "Account_Platform",
                 "Live_Price", "Live_Value", "Capital_Gain_Value", "Capital_Gain_Percent", "Investment_Type"
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0, 0, 0, 0, 'Equity')
-        """, (ticker.upper(), units, price, purchase_value, date, country, currency, units))
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'Manual', 0, 0, 0, 0, %s)
+        """, (ticker.upper(), units, price, price, purchase_value, date, country, currency, exch_rate, units, inv_type))
         conn.commit()
         conn.close()
         return True
@@ -244,11 +250,13 @@ with tab_trading:
         with c3:
             country = st.selectbox("Market Country", ["USA", "AUS", "IND"])
             currency = st.selectbox("Local Currency", ["USD", "AUD", "INR"])
+        
+        inv_type = st.selectbox("Investment Type", ["Equity", "ETF", "Managed Fund"])
 
         if st.form_submit_button("🚀 Record Manual Trade", width='stretch'):
             if ticker and units > 0:
                  # Step 1: Save to DB
-                success = add_investment(ticker, units, price, purchase_date.strftime('%Y-%m-%d'), country, currency)
+                success = add_investment(ticker, units, price, purchase_date.strftime('%Y-%m-%d'), country, currency, inv_type)
             
                 if success:
                     # Step 2: Trigger Live Calculation
