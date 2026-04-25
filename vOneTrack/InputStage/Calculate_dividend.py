@@ -27,6 +27,14 @@ class DividendCalculator:
 
     def _get_connection(self):
         return psycopg2.connect(**st.secrets["supabase"])
+        
+    def sync_sequence(self):
+        """Force the primary key sequence to match the actual data to avoid UniqueViolations."""
+        self._execute("""
+            SELECT setval(pg_get_serial_sequence('public."Dividends"', 'id'), 
+                          COALESCE((SELECT MAX("id") FROM "Dividends"), 0) + 1, 
+                          false);
+        """)
 
     def _query(self, sql: str, params: tuple = ()) -> List[tuple]:
         """Helper: Execute query and return results."""
@@ -65,6 +73,8 @@ class DividendCalculator:
                 FOREIGN KEY (investment_id) REFERENCES "Investment"(id)
             )
         ''')
+        
+        self.sync_sequence()
 
     def _normalize_date(self, date_str: str) -> str:
         """Convert any date format to YYYY-MM-DD."""
@@ -187,6 +197,9 @@ class DividendCalculator:
         """Store a single dividend record."""
         values = {**self.DEFAULT_DIVIDEND_VALUES, **kwargs}
         total_dividend = num_shares * dividend_per_unit
+        
+        # Sync sequence right before insert to ensure the auto-increment is correct
+        self.sync_sequence()
 
         self._execute('''
             INSERT INTO "Dividends" 

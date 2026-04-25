@@ -92,6 +92,13 @@ for tab_name, rows in tabs_data.items():
     except Exception as e:
         print(f"❌ Error saving '{tab_name}': {e}")
 
+# --- HEAL SEQUENCES AFTER BATCH IMPORT ---
+cursor.execute("""
+    SELECT setval(pg_get_serial_sequence('public."Investment"', 'id'), 
+                  COALESCE((SELECT MAX("id") FROM "Investment"), 0) + 1, 
+                  false);
+""")
+
 # Save and close after the loop finishes
 conn.commit()
 conn.close()

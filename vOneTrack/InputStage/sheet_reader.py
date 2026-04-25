@@ -82,6 +82,13 @@ def sync_broker_sheet_to_sqlite():
                 # Skip empty or malformed rows
                 continue 
 
+        # Sync sequence for Investment table before committing
+        cursor.execute("""
+            SELECT setval(pg_get_serial_sequence('public."Investment"', 'id'), 
+                          COALESCE((SELECT MAX("id") FROM "Investment"), 0) + 1, 
+                          false);
+        """)
+
         conn.commit()
         conn.close()
 

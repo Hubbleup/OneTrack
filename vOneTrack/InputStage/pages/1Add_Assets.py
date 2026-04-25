@@ -22,8 +22,19 @@ from googleapi import create_google_service, get_messages_from_sender
 from Calculate_dividend import DividendCalculator
 from Portfolio_updater import PortfolioUpdater 
 
+def get_engine():
+    """Utility to create a SQLAlchemy engine to resolve Pandas UserWarnings."""
+    user = urllib.parse.quote_plus(st.secrets['supabase']['user'])
+    password = urllib.parse.quote_plus(st.secrets['supabase']['password'])
+    host = st.secrets['supabase']['host']
+    port = st.secrets['supabase']['port']
+    database = st.secrets['supabase']['database']
+    db_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+    return create_engine(db_url)
+
 # --- 2. DATABASE LOGIC ---
-def init_super_db():
+def init_db_sequences():
+    """Synchronizes all table sequences to prevent UniqueViolation (duplicate key) errors."""
     conn = psycopg2.connect(**st.secrets["supabase"])
     cursor = conn.cursor()
     cursor.execute("""
@@ -35,10 +46,29 @@ def init_super_db():
             "created_at" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # Comprehensive sequence sync for all primary tables
+    sync_targets = [
+        ('public."Super_Tracking"', 'row_id'),
+        ('public."Investment"', 'id'),
+        ('public."Dividends"', 'id')
+    ]
+    
+    for table, col in sync_targets:
+        try:
+            cursor.execute(f"""
+                SELECT setval(pg_get_serial_sequence('{table}', '{col}'), 
+                              COALESCE((SELECT MAX("{col}") FROM {table}), 0) + 1, 
+                              false);
+            """)
+        except Exception:
+            pass # Handle cases where tables might not be initialized yet
+            
     conn.commit()
     conn.close()
 
 def add_investment(ticker, units, price, date, country, currency):
+    init_db_sequences() # Sync before manual insert
     purchase_value = units * price
     try:
         conn = psycopg2.connect(**st.secrets["supabase"])
@@ -97,19 +127,24 @@ def run_sync():
 
 
 def save_super_entry(name, r_date, value):
-    conn = psycopg2.connect(**st.secrets["supabase"])
-    cursor = conn.cursor()
-    cursor.execute('INSERT INTO "Super_Tracking" ("super_name", "recorded_date", "value_aud") VALUES (%s, %s, %s)', (name, r_date, value))
-    conn.commit()
-    conn.close()
+    init_db_sequences() # Sync before manual insert
+    try:
+        conn = psycopg2.connect(**st.secrets["supabase"])
+        cursor = conn.cursor()
+        cursor.execute('INSERT INTO "Super_Tracking" ("super_name", "recorded_date", "value_aud") VALUES (%s, %s, %s)', (name, r_date, value))
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.error(f"Error saving super entry: {e}")
+        return False
 
 def get_super_history():
-    conn = psycopg2.connect(**st.secrets["supabase"])
+    engine = get_engine()
     try:
-        df = pd.read_sql_query('SELECT * FROM "Super_Tracking" ORDER BY "recorded_date" ASC', conn)
+        df = pd.read_sql_query('SELECT * FROM "Super_Tracking" ORDER BY "recorded_date" ASC', engine)
     except:
         df = pd.DataFrame()
-    conn.close()
     return df
 
 def clean_currency_string(value):
@@ -181,11 +216,11 @@ def map_Vanguard_csv(df):
             "Capital_Gain_Percent": 0.0,
             "Investment_Type": row['Product Type']  # Default value - adjust based on 'Product Type' if needed
         }
-        mapped_rows.append(mapped_entry)
+        mapped_rows.append(mapped_entry)    
         
     return pd.DataFrame(mapped_rows)
 
-init_super_db()
+init_db_sequences()
 
 # --- 3. UI CONFIGURATION ---
 st.set_page_config(page_title="Asset Console", layout="wide", page_icon="💹")
@@ -272,21 +307,16 @@ if 'pending_trades' in st.session_state:
     with col1:
         if st.button("🚀 Import All to Database", type="primary", use_container_width=True):
              try:
-                # URL-encode credentials to handle special characters in passwords
-                user = urllib.parse.quote_plus(st.secrets['supabase']['user'])
-                password = urllib.parse.quote_plus(st.secrets['supabase']['password'])
-                host = st.secrets['supabase']['host']
-                port = st.secrets['supabase']['port']
-                database = st.secrets['supabase']['database']
-                
-                db_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-                engine = create_engine(db_url)
+                engine = get_engine()
 
                 # Step 1: Batch Save CSV data
                 with engine.connect() as conn:
                     # Use correct case for 'Investment'
                     df_pending.to_sql('Investment', conn, if_exists='append', index=False, schema='public')
                 
+                # Sync sequences immediately after batch import to heal the ID counter
+                init_db_sequences()
+
                 # Step 2: Batch Refresh all prices (Replaces 0.0s with real numbers)
                 with st.spinner("Synchronising with Market Data..."):
                     updater = PortfolioUpdater()
@@ -330,9 +360,9 @@ with tab_super:
         
         if st.form_submit_button("💾 Save Balance to History", use_container_width=True):
             if selected_option and s_value > 0:
-                save_super_entry(selected_option, s_date.strftime('%Y-%m-%d'), s_value)
-                st.toast("Balance recorded!")
-                st.rerun()
+                if save_super_entry(selected_option, s_date.strftime('%Y-%m-%d'), s_value):
+                    st.toast("Balance recorded!")
+                    st.rerun()
 
     if not super_data.empty:
         st.divider()

@@ -4,6 +4,8 @@ import pandas as pd
 import plotly.express as px
 import yfinance as yf
 from datetime import datetime
+from sqlalchemy import create_engine
+import urllib.parse
 import os
 from Calculate_dividend import DividendCalculator
 
@@ -19,6 +21,16 @@ class DividendVisualizer:
 
     def _get_connection(self):
         return psycopg2.connect(**st.secrets["supabase"])
+
+    def _get_engine(self):
+        """Utility to create a SQLAlchemy engine for pandas compatibility."""
+        user = urllib.parse.quote_plus(st.secrets['supabase']['user'])
+        password = urllib.parse.quote_plus(st.secrets['supabase']['password'])
+        host = st.secrets['supabase']['host']
+        port = st.secrets['supabase']['port']
+        database = st.secrets['supabase']['database']
+        db_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+        return create_engine(db_url)
 
     def get_time_logic(self, choice: str):
         if choice == 'Y':
@@ -50,15 +62,15 @@ class DividendVisualizer:
 
         query = f"SELECT \"ticker\" AS \"Ticker\", {group_sql} AS \"Period\", SUM(\"total_dividend\") AS \"Earnings\" " \
                 f"FROM \"Dividends\" {where_clause} GROUP BY \"ticker\", \"Period\" ORDER BY MIN(\"payment_date\") ASC;"
-        with self._get_connection() as conn:
-            return pd.read_sql_query(query, conn)
+        engine = self._get_engine()
+        return pd.read_sql_query(query, engine)
         
     def fetch_recent_payments(self, limit=5):
         query = f"SELECT \"ticker\" AS \"Ticker\", \"payment_date\" AS \"Pay Date\", \"num_shares\" AS \"Shares\", " \
                 f"\"dividend_per_unit\" AS \"Per Share\", \"total_dividend\" AS \"Total\" FROM \"Dividends\" " \
                 f"ORDER BY \"payment_date\" DESC LIMIT {limit};"
-        with self._get_connection() as conn:
-            return pd.read_sql_query(query, conn)
+        engine = self._get_engine()
+        return pd.read_sql_query(query, engine)
             
     def update_dividend_data(self):
         with self._get_connection() as conn:
@@ -136,8 +148,8 @@ with m_col1:
 
 with m_col2:
     try:
-        with viz._get_connection() as conn:
-            forecast_df = pd.read_sql_query('SELECT ("Units" * "Annual_Dividend") as "Annual_Income" FROM "Investment" WHERE "Annual_Dividend" > 0 AND "Units" > 0', conn)
+        engine = viz._get_engine()
+        forecast_df = pd.read_sql_query('SELECT ("Units" * "Annual_Dividend") as "Annual_Income" FROM "Investment" WHERE "Annual_Dividend" > 0 AND "Units" > 0', engine)
         total_forecast = forecast_df['Annual_Income'].sum() if not forecast_df.empty else 0.0
         st.metric(label="🔮 Est. Forward Income (Next 12m)", value=f"${total_forecast:,.2f}")
     except:
@@ -146,9 +158,9 @@ with m_col2:
 # --- 6. ANNOUNCEMENTS TABLE ---
 st.subheader("📢 Current Yields & Announcements")
 try:
-    with viz._get_connection() as conn:
+    engine = viz._get_engine()
         # Postgres TO_TIMESTAMP for unix epoch
-        yield_df = pd.read_sql_query('SELECT "Ticker", "Dividend_Yield" as "Yield %", "Annual_Dividend" as "Div/Share", TO_TIMESTAMP("Last_Ex_Date")::date as "Last Ex-Date" FROM "Investment" WHERE "Annual_Dividend" > 0', conn)
+    yield_df = pd.read_sql_query('SELECT "Ticker", "Dividend_Yield" as "Yield %", "Annual_Dividend" as "Div/Share", TO_TIMESTAMP("Last_Ex_Date")::date as "Last Ex-Date" FROM "Investment" WHERE "Annual_Dividend" > 0', engine)
         st.dataframe(yield_df, use_container_width=True, hide_index=True)
 except:
     st.info("No announcement data found. Run 'Update Yields' to fetch.")

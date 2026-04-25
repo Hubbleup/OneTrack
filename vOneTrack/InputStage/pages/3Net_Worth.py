@@ -5,6 +5,8 @@ import plotly.express as px
 import plotly.graph_objects as go
 import yfinance as yf
 from datetime import datetime
+from sqlalchemy import create_engine
+import urllib.parse
 import threading
 import os
 import sys
@@ -33,6 +35,16 @@ show_sync_status()
 
 # --- 4. DATA FETCHING FUNCTIONS ---
 
+def get_engine():
+    """Utility to create a SQLAlchemy engine to resolve Pandas UserWarnings."""
+    user = urllib.parse.quote_plus(st.secrets['supabase']['user'])
+    password = urllib.parse.quote_plus(st.secrets['supabase']['password'])
+    host = st.secrets['supabase']['host']
+    port = st.secrets['supabase']['port']
+    database = st.secrets['supabase']['database']
+    db_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+    return create_engine(db_url)
+
 @st.cache_data(ttl=3600)
 def get_portfolio_with_history(df):
     """Fetches 7-day price history for sparkline charts."""
@@ -50,7 +62,7 @@ def get_portfolio_with_history(df):
 
 def get_investment_data():
     """Aggregates investment data from SQLite."""
-    conn = psycopg2.connect(**st.secrets["supabase"])
+    engine = get_engine()
     query = """
     SELECT "Ticker", "Country", SUM("Units") as "Units", SUM("Purchase_Value") as "Total_Cost_AUD",
            MAX("Live_Price") as "Live_Price", MIN("Purchase_Date") as "Oldest_Purchase",
@@ -59,13 +71,12 @@ def get_investment_data():
     WHERE "Remain_Balance" > 0 OR "Remain_Balance" IS NULL
     GROUP BY "Ticker", "Country"
     """
-    df = pd.read_sql_query(query, conn)
-    conn.close()
+    df = pd.read_sql_query(query, engine)
     return df
 
 def get_latest_super_balance():
     """Fetches the most recent balance for each super fund."""
-    conn = psycopg2.connect(**st.secrets["supabase"])
+    engine = get_engine()
     try:
         query = """
         SELECT SUM(value_aud) as "Total_Super" FROM (
@@ -73,11 +84,9 @@ def get_latest_super_balance():
             FROM "Super_Tracking"
         ) WHERE rn = 1
         """
-        df = pd.read_sql_query(query, conn)
-        conn.close()
+        df = pd.read_sql_query(query, engine)
         return df['Total_Super'].iloc[0] if not df.empty and df['Total_Super'].iloc[0] is not None else 0.0
     except:
-        conn.close()
         return 0.0
 
 # --- 5. PLOTTING & DISPLAY FUNCTIONS ---
