@@ -16,7 +16,19 @@ def check_auth():
 def show_login_page():
     # Note: Page config should usually be set in the main script, 
     # but if this is a standalone login intercept, we ensure titles are clear.
-    
+
+    # Hide sidebar and navigation links while on the login page
+    st.markdown(
+        """
+        <style>
+            section[data-testid="stSidebar"] {
+                display: none;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
     st.title("🔐 OneTrack Investment Hub")
     st.subheader("Please sign in to continue")
 
