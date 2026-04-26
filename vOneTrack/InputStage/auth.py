@@ -35,7 +35,7 @@ def show_login_page():
                     res = requests.post(
                         f"{url}/auth/v1/otp",
                         headers=headers,
-                        json={"email": email, "create_user": True}
+                        json={"email": email, "create_user": True, "options": {"redirectTo": url}}
                     )
                     if res.status_code == 200:
                         st.session_state["otp_sent"] = True
@@ -70,7 +70,8 @@ def show_login_page():
     with tab2:
         st.write("Login securely using your Google account.")
         # This uses Supabase's built-in OAuth provider
-        google_auth_url = f"{url}/auth/v1/authorize?provider=google"
+        # Added apikey to the URL to resolve the "No API key found" error
+        google_auth_url = f"{url}/auth/v1/authorize?provider=google&apikey={key}"
         
         if st.button("Continue with Google", type="primary", width='stretch'):
             st.link_button("Redirect to Google Sign-In", google_auth_url, type="primary", use_container_width=True)
