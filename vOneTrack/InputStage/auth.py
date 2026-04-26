@@ -6,16 +6,14 @@ def check_auth():
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
 
-    # 1. Check if we are returning from a successful OAuth redirect
-    # Supabase returns tokens in the URL hash, which Python can't see, 
-    # but it sometimes includes a 'code' or 'type=recovery' in query params.
-    query_params = st.query_params
-    if "access_token" in query_params or "code" in query_params:
-        # In a sophisticated setup, we'd verify this code/token via requests.
-        # For now, we trust the redirect if it came back to our site.
-        st.session_state["authenticated"] = True
-        # Clean up the URL
-        st.query_params.clear()
+    # 1. Check if we are returning from a redirect with query params
+    # Note: Streamlit cannot read #access_token fragments, which is why 
+    # the 6-digit OTP code method (Tab 1) is much more reliable for Streamlit.
+    if not st.session_state["authenticated"]:
+        if "code" in st.query_params:
+            st.session_state["authenticated"] = True
+            st.query_params.clear()
+            st.rerun()
 
     if not st.session_state["authenticated"]:
         show_login_page()
@@ -42,10 +40,16 @@ def show_login_page():
 
     # Ensure we use the base Supabase URL (https://xyz.supabase.co) and not the REST API URL
     supabase_url = st.secrets["supabase"]["url"].split("/rest/v1")[0].rstrip("/")
-    # IMPORTANT: Set this to your actual Streamlit App URL (e.g. https://onetrack.streamlit.app)
-    # For local testing, use http://localhost:8501
-    site_url = "http://localhost:8501" 
     
+    # Dynamically detect if we are running locally or on Streamlit Cloud
+    if st.secrets.get("is_prod"):
+        site_url = "https://onetrack.streamlit.app"
+    else:
+        site_url = "http://localhost:8501"
+    
+    # Define a consistent redirect target with a trailing slash for Supabase matching
+    redirect_target = f"{site_url}/"
+
     key = st.secrets["supabase"]["anon_key"]
     headers = {"apikey": key, "Content-Type": "application/json"}
 
@@ -60,7 +64,7 @@ def show_login_page():
                     res = requests.post(
                         f"{supabase_url}/auth/v1/otp",
                         headers=headers,
-                        json={"email": email, "create_user": True, "options": {"redirectTo": site_url}}
+                        json={"email": email, "create_user": True, "options": {"redirectTo": redirect_target}}
                     )
                     if res.status_code == 200:
                         st.session_state["otp_sent"] = True
@@ -96,7 +100,7 @@ def show_login_page():
         st.write("Login securely using your Google account.")
         # This uses Supabase's built-in OAuth provider
         # Added apikey to the URL to resolve the "No API key found" error
-        google_auth_url = f"{supabase_url}/auth/v1/authorize?provider=google&apikey={key}&redirect_to={site_url}"
+        google_auth_url = f"{supabase_url}/auth/v1/authorize?provider=google&apikey={key}&redirect_to={redirect_target}"
         
         if st.button("Continue with Google", type="primary", width='stretch'):
             st.link_button("Redirect to Google Sign-In", google_auth_url, type="primary", use_container_width=True)
