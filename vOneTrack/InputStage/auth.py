@@ -1,6 +1,24 @@
 import streamlit as st
 import requests
 
+def is_authorized(email):
+    """
+    Checks if the email is in the authorized list.
+    In production, move this list to st.secrets for security.
+    """
+    # Example whitelist. Add your authorized emails here.
+    authorized_emails = st.secrets.get("authorized_users", ["your-email@gmail.com"])
+    return email.lower() in [e.lower() for e in authorized_emails]
+
+def handle_unauthorized():
+    """Clears session and stops execution for unauthorized users."""
+    st.error("🚫 Access Denied: Your email is not on the authorized list.")
+    st.session_state["authenticated"] = False
+    st.session_state.pop("user", None)
+    if st.button("Back to Login"):
+        st.rerun()
+    st.stop()
+
 def check_auth():
     """Centralized function to verify authentication state on every page."""
     if "authenticated" not in st.session_state:
@@ -11,9 +29,18 @@ def check_auth():
     # the 6-digit OTP code method (Tab 1) is much more reliable for Streamlit.
     if not st.session_state["authenticated"]:
         if "code" in st.query_params:
+            # Note: In a production environment with Google Auth, 
+            # you would normally exchange the code for the user profile 
+            # to verify the email before setting authenticated=True.
             st.session_state["authenticated"] = True
             st.query_params.clear()
             st.rerun()
+
+    # Verify email after authentication
+    if st.session_state.get("authenticated"):
+        user = st.session_state.get("user")
+        if user and not is_authorized(user.get("email")):
+            handle_unauthorized()
 
     if not st.session_state["authenticated"]:
         show_login_page()
@@ -85,10 +112,14 @@ def show_login_page():
                         json={"email": email, "token": token, "type": "magiclink"}
                     )
                     if res.status_code == 200:
-                        st.session_state["authenticated"] = True
-                        st.session_state["user"] = res.json()["user"]
-                        st.success("Logged in successfully!")
-                        st.rerun()
+                        user_data = res.json().get("user")
+                        if user_data and is_authorized(user_data.get("email")):
+                            st.session_state["authenticated"] = True
+                            st.session_state["user"] = user_data
+                            st.success("Logged in successfully!")
+                            st.rerun()
+                        else:
+                            st.error("🚫 This email is not authorized to access this app.")
                     else:
                         st.error("Invalid code. Please try again.")
             with col_v2:
