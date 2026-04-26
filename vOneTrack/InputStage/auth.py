@@ -7,7 +7,10 @@ def is_authorized(email):
     In production, move this list to st.secrets for security.
     """
     # Example whitelist. Add your authorized emails here.
-    authorized_emails = st.secrets.get("authorized_users", ["your-email@gmail.com"])
+    authorized_emails = st.secrets.get("authorized_users", [])
+    if not authorized_emails:
+        st.error("Security Error: No authorized users configured in secrets.")
+        return False
     return email.lower() in [e.lower() for e in authorized_emails]
 
 def handle_unauthorized():
