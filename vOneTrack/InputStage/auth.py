@@ -20,7 +20,8 @@ def show_login_page():
     st.title("🔐 OneTrack Investment Hub")
     st.subheader("Please sign in to continue")
 
-    url = st.secrets["supabase"]["url"]
+    # Ensure we use the base Supabase URL (https://xyz.supabase.co) and not the REST API URL
+    url = st.secrets["supabase"]["url"].split("/rest/v1")[0].rstrip("/")
     key = st.secrets["supabase"]["anon_key"]
     headers = {"apikey": key, "Content-Type": "application/json"}
 
