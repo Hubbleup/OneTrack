@@ -12,7 +12,9 @@ class DividendVisualizer:
         pass
 
     def _get_connection(self):
-        return psycopg2.connect(**st.secrets["supabase"])
+        pg_keys = ["host", "port", "database", "user", "password", "options"]
+        conn_params = {k: v for k, v in st.secrets["supabase"].items() if k in pg_keys}
+        return psycopg2.connect(**conn_params)
 
     def _get_engine(self):
         """Utility to create a SQLAlchemy engine for pandas compatibility."""

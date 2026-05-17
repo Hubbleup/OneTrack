@@ -26,7 +26,9 @@ class DividendCalculator:
         self.init_database()
 
     def _get_connection(self):
-        return psycopg2.connect(**st.secrets["supabase"])
+        pg_keys = ["host", "port", "database", "user", "password", "options"]
+        conn_params = {k: v for k, v in st.secrets["supabase"].items() if k in pg_keys}
+        return psycopg2.connect(**conn_params)
         
     def sync_sequence(self):
         """Force the primary key sequence to match the actual data to avoid UniqueViolations."""

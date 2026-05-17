@@ -8,7 +8,9 @@ st.title("🔌 Supabase Connection Diagnostic")
 def test_connection():
     try:
         # Attempt to connect using secrets
-        conn = psycopg2.connect(**st.secrets["supabase"])
+        pg_keys = ["host", "port", "database", "user", "password", "options"]
+        conn_params = {k: v for k, v in st.secrets["supabase"].items() if k in pg_keys}
+        conn = psycopg2.connect(**conn_params)
         st.success("✅ Successfully connected to Supabase!")
         
         # 1. Check for Tables

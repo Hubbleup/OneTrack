@@ -34,7 +34,9 @@ def sync_broker_sheet_to_sqlite():
             return False, "No data found in 'From CSV' tab."
 
         # 3. DATABASE CONNECTION
-        conn = psycopg2.connect(**st.secrets["supabase"])
+        pg_keys = ["host", "port", "database", "user", "password", "options"]
+        conn_params = {k: v for k, v in st.secrets["supabase"].items() if k in pg_keys}
+        conn = psycopg2.connect(**conn_params)
         cursor = conn.cursor()
 
         import_count = 0

@@ -36,7 +36,9 @@ def get_engine():
 # --- 2. DATABASE LOGIC ---
 def init_db_sequences():
     """Synchronizes all table sequences to prevent UniqueViolation (duplicate key) errors."""
-    conn = psycopg2.connect(**st.secrets["supabase"])
+    pg_keys = ["host", "port", "database", "user", "password", "options"]
+    conn_params = {k: v for k, v in st.secrets["supabase"].items() if k in pg_keys}
+    conn = psycopg2.connect(**conn_params)
     cursor = conn.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS "Super_Tracking" (
@@ -77,7 +79,9 @@ def add_investment(ticker, units, price, date, country, currency, inv_type):
     exch_rate = rates.get(country, 1.0)
 
     try:
-        conn = psycopg2.connect(**st.secrets["supabase"])
+        pg_keys = ["host", "port", "database", "user", "password", "options"]
+        conn_params = {k: v for k, v in st.secrets["supabase"].items() if k in pg_keys}
+        conn = psycopg2.connect(**conn_params)
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO "Investment" (
@@ -136,7 +140,9 @@ def run_sync():
 def save_super_entry(name, r_date, value):
     init_db_sequences() # Sync before manual insert
     try:
-        conn = psycopg2.connect(**st.secrets["supabase"])
+        pg_keys = ["host", "port", "database", "user", "password", "options"]
+        conn_params = {k: v for k, v in st.secrets["supabase"].items() if k in pg_keys}
+        conn = psycopg2.connect(**conn_params)
         cursor = conn.cursor()
         cursor.execute('INSERT INTO "Super_Tracking" ("super_name", "recorded_date", "value_aud") VALUES (%s, %s, %s)', (name, r_date, value))
         conn.commit()

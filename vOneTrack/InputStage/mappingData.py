@@ -12,7 +12,9 @@ tabs_data = get_specific_tabs_data(my_tabs)
 
 # 3. Database setup (using the absolute path we verified)
 try:
-    conn = psycopg2.connect(**st.secrets["supabase"])
+    pg_keys = ["host", "port", "database", "user", "password", "options"]
+    conn_params = {k: v for k, v in st.secrets["supabase"].items() if k in pg_keys}
+    conn = psycopg2.connect(**conn_params)
     cursor = conn.cursor()
 except Exception as e:
     print(f"❌ Connection Error: {e}")

@@ -5,7 +5,9 @@ import pandas as pd
 from googleapi import create_google_service
 
 def get_all_investment_data():
-    conn = psycopg2.connect(**st.secrets["supabase"])
+    pg_keys = ["host", "port", "database", "user", "password", "options"]
+    conn_params = {k: v for k, v in st.secrets["supabase"].items() if k in pg_keys}
+    conn = psycopg2.connect(**conn_params)
     # Fetching from Supabase 'Investment' table
     df = pd.read_sql_query('SELECT * FROM "Investment"', conn)
     conn.close()
