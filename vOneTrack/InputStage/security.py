@@ -5,6 +5,7 @@ Handles secure credential loading and sheet access setup
 
 import os
 import json
+import streamlit as st
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -22,14 +23,18 @@ def get_sheet_service():
     """
     Scope = ['https://www.googleapis.com/auth/spreadsheets']
     
-    base_dir = os.path.dirname(__file__)
-    service_account_file = os.path.join(base_dir, "gcpkey.json")
-    
-    # Load credentials from service account JSON file
-    credentials = service_account.Credentials.from_service_account_file(
-        service_account_file, 
-        scopes=Scope
-    )
+    # Check if running on Streamlit Cloud using secrets
+    if "gcp_service_account" in st.secrets:
+        creds_info = dict(st.secrets["gcp_service_account"])
+        credentials = service_account.Credentials.from_service_account_info(creds_info, scopes=Scope)
+    else:
+        # Fallback for local development
+        base_dir = os.path.dirname(__file__)
+        service_account_file = os.path.join(base_dir, "gcpkey.json")
+        credentials = service_account.Credentials.from_service_account_file(
+            service_account_file, 
+            scopes=Scope
+        )
     
     # Build and return the service
     service = build('sheets', 'v4', credentials=credentials)
@@ -67,6 +72,3 @@ if __name__ == "__main__":
         print(f"✗ Error: {e}")
     except Exception as e:
         print(f"✗ Authentication failed: {e}")
-
-
-

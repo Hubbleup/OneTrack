@@ -41,21 +41,26 @@ def check_auth():
             supabase_url = st.secrets["supabase"]["url"].split("/rest/v1")[0].rstrip("/")
             key = st.secrets["supabase"]["anon_key"]
             
-            res = requests.post(
-                f"{supabase_url}/auth/v1/token?grant_type=pkce",
-                headers={"apikey": key, "Content-Type": "application/json"},
-                json={
-                    "code": st.query_params["code"],
-                    "code_verifier": st.session_state.get("code_verifier") # Requires PKCE flow
-                }
-            )
+            try:
+                res = requests.post(
+                    f"{supabase_url}/auth/v1/token?grant_type=pkce",
+                    headers={"apikey": key, "Content-Type": "application/json"},
+                    json={
+                        "code": st.query_params["code"],
+                        "code_verifier": st.session_state.get("code_verifier") # Requires PKCE flow
+                    },
+                    timeout=10
+                )
+            except requests.exceptions.RequestException as e:
+                st.error(f"Authentication connection error: {e}")
+                return
             
             # For a simpler whitelist-first approach, we default to Tab 1 (Email OTP)
             # If using standard Google Redirect without PKCE, query params alone 
             # are insufficient to identify the user email safely in Python.
             # We'll allow the session to initialize but the 'is_authorized' check 
             # below will catch missing user profiles.
-            if not st.session_state.get("user"):
+            if res.status_code == 200 and not st.session_state.get("user"):
                 st.session_state["authenticated"] = True
                 st.query_params.clear()
                 st.rerun()
@@ -112,17 +117,21 @@ def show_login_page():
         if "otp_sent" not in st.session_state:
             if st.button("Send Magic Code", width='stretch'):
                 if email:
-                    res = requests.post(
-                        f"{supabase_url}/auth/v1/otp",
-                        headers=headers,
-                        json={"email": email, "create_user": True, "options": {"redirectTo": redirect_target}}
-                    )
-                    if res.status_code == 200:
-                        st.session_state["otp_sent"] = True
-                        st.success("Verification code sent to your email!")
-                        st.rerun()
-                    else:
-                        st.error(f"Error: {res.json().get('msg', 'Failed to send OTP')}")
+                    try:
+                        res = requests.post(
+                            f"{supabase_url}/auth/v1/otp",
+                            headers=headers,
+                            json={"email": email, "create_user": True, "options": {"redirectTo": redirect_target}},
+                            timeout=10
+                        )
+                        if res.status_code == 200:
+                            st.session_state["otp_sent"] = True
+                            st.success("Verification code sent to your email!")
+                            st.rerun()
+                        else:
+                            st.error(f"Error: {res.json().get('msg', 'Failed to send OTP')}")
+                    except requests.exceptions.RequestException as e:
+                        st.error(f"Connection Error: {e}. Please check your Supabase URL in secrets.")
                 else:
                     st.warning("Please enter an email address.")
         else:
@@ -130,22 +139,26 @@ def show_login_page():
             col_v1, col_v2 = st.columns(2)
             with col_v1:
                 if st.button("Verify & Login", type="primary", width='stretch'):
-                    res = requests.post(
-                        f"{supabase_url}/auth/v1/verify",
-                        headers=headers,
-                        json={"email": email, "token": token, "type": "magiclink"}
-                    )
-                    if res.status_code == 200:
-                        user_data = res.json().get("user")
-                        if user_data and is_authorized(user_data.get("email")):
-                            st.session_state["authenticated"] = True
-                            st.session_state["user"] = user_data
-                            st.success("Logged in successfully!")
-                            st.rerun()
+                    try:
+                        res = requests.post(
+                            f"{supabase_url}/auth/v1/verify",
+                            headers=headers,
+                            json={"email": email, "token": token, "type": "magiclink"},
+                            timeout=10
+                        )
+                        if res.status_code == 200:
+                            user_data = res.json().get("user")
+                            if user_data and is_authorized(user_data.get("email")):
+                                st.session_state["authenticated"] = True
+                                st.session_state["user"] = user_data
+                                st.success("Logged in successfully!")
+                                st.rerun()
+                            else:
+                                st.error("🚫 This email is not authorized to access this app.")
                         else:
-                            st.error("🚫 This email is not authorized to access this app.")
-                    else:
-                        st.error("Invalid code. Please try again.")
+                            st.error("Invalid code. Please try again.")
+                    except requests.exceptions.RequestException as e:
+                        st.error(f"Connection Error: {e}")
             with col_v2:
                 if st.button("Reset", width='stretch'):
                     del st.session_state["otp_sent"]
