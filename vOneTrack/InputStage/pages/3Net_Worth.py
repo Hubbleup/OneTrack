@@ -19,7 +19,7 @@ if current_dir not in sys.path:
 # Internal Imports
 from Portfolio_updater import PortfolioUpdater 
 from uploadtoGSfromDB import upload_db_to_sheet
-from utils import show_sync_status 
+from utils import show_sync_status, get_db_engine
 
 # --- 2. BACKGROUND SYNC ENGINE ---
 if 'sync_started' not in st.session_state:
@@ -36,14 +36,7 @@ show_sync_status()
 # --- 4. DATA FETCHING FUNCTIONS ---
 
 def get_engine():
-    """Utility to create a SQLAlchemy engine to resolve Pandas UserWarnings."""
-    user = urllib.parse.quote_plus(st.secrets['supabase']['user'])
-    password = urllib.parse.quote_plus(st.secrets['supabase']['password'])
-    host = st.secrets['supabase']['host']
-    port = st.secrets['supabase']['port']
-    database = st.secrets['supabase']['database']
-    db_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-    return create_engine(db_url)
+    return get_db_engine()
 
 @st.cache_data(ttl=3600)
 def get_portfolio_with_history(df):

@@ -7,6 +7,7 @@ from datetime import datetime
 from sqlalchemy import create_engine
 import urllib.parse
 import os
+from utils import get_db_connection, get_db_engine
 from Calculate_dividend import DividendCalculator
 
 # --- 1. CONFIGURATION ---
@@ -20,17 +21,10 @@ class DividendVisualizer:
         pass
 
     def _get_connection(self):
-        return psycopg2.connect(**st.secrets["supabase"])
+        return get_db_connection()
 
     def _get_engine(self):
-        """Utility to create a SQLAlchemy engine for pandas compatibility."""
-        user = urllib.parse.quote_plus(st.secrets['supabase']['user'])
-        password = urllib.parse.quote_plus(st.secrets['supabase']['password'])
-        host = st.secrets['supabase']['host']
-        port = st.secrets['supabase']['port']
-        database = st.secrets['supabase']['database']
-        db_url = f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
-        return create_engine(db_url)
+        return get_db_engine()
 
     def get_time_logic(self, choice: str):
         if choice == 'Y':
