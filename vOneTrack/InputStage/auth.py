@@ -38,7 +38,7 @@ def check_auth():
     if not st.session_state["authenticated"]:
         if "code" in st.query_params:
             # To properly verify Google Auth, we must exchange the code for a session
-            supabase_url = st.secrets["supabase"]["url"].split("/rest/v1")[0].rstrip("/")
+            supabase_url = st.secrets["supabase"]["url"].strip().split("/rest/v1")[0].rstrip("/")
             key = st.secrets["supabase"]["anon_key"]
             
             try:
@@ -95,7 +95,7 @@ def show_login_page():
     st.subheader("Please sign in to continue")
 
     # Ensure we use the base Supabase URL (https://xyz.supabase.co) and not the REST API URL
-    supabase_url = st.secrets["supabase"]["url"].split("/rest/v1")[0].rstrip("/")
+    supabase_url = st.secrets["supabase"]["url"].strip().split("/rest/v1")[0].rstrip("/")
     
     # Dynamically detect if we are running locally or on Streamlit Cloud
     if st.secrets.get("is_prod"):
