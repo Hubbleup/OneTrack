@@ -1,5 +1,5 @@
 import psycopg2
-from time import time
+import time
 import yfinance as yf
 import os
 import pandas as pd
