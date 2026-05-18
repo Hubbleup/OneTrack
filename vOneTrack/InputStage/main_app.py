@@ -29,7 +29,14 @@ try:
     
     # Total Invested
     # Note: Using quoted table names to match Supabase capitalization
-    cost_basis = pd.read_sql('SELECT SUM("Purchase_Value") FROM "Investment"', engine).iloc[0,0] or 0
+    investments = pd.read_sql('SELECT "Purchase_Value", "Exchange_Rate", "Country" FROM "Investment"', engine)
+    def get_aud_cost(row):
+        val, rate, country = row['Purchase_Value'], row['Exchange_Rate'], row['Country']
+        if country == 'IND' and (rate is None or rate == 1.0 or pd.isna(rate)):
+            return val * 0.018
+        return val * (rate if rate and not pd.isna(rate) else 1.0)
+    
+    cost_basis = investments.apply(get_aud_cost, axis=1).sum() if not investments.empty else 0
     col1.metric("Total Cost Basis", f"${cost_basis:,.2f}")
     
     # Total Dividends

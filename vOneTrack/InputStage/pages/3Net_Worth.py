@@ -56,16 +56,30 @@ def get_portfolio_with_history(df):
 def get_investment_data():
     """Aggregates investment data from SQLite."""
     engine = get_engine()
-    query = """ 
-    SELECT "Ticker", "Country", SUM("Units") as "Units", SUM("Purchase_Value" * COALESCE("Exchange_Rate", 1.0)) as "Total_Cost_AUD",
-           MAX("Live_Price") as "Live_Price", MIN("Purchase_Date") as "Oldest_Purchase",
-           MAX("Purchase_Date") as "Newest_Purchase"
+    # Fetch raw data to apply conditional logic in Python for historical conversions
+    query = """
+    SELECT "Ticker", "Country", "Units", "Purchase_Value", "Exchange_Rate", "Live_Price", "Purchase_Date"
     FROM "Investment" 
     WHERE "Remain_Balance" > 0 OR "Remain_Balance" IS NULL
-    GROUP BY "Ticker", "Country"
     """
-    df = pd.read_sql_query(query, engine)
-    return df
+    df_raw = pd.read_sql_query(query, engine)
+    
+    def calculate_cost_aud(row):
+        rate = row['Exchange_Rate']
+        # Logic: If IND and rate is 1.0/None, it's an unconverted INR value. Apply 0.018 fallback.
+        if row['Country'] == 'IND' and (pd.isna(rate) or rate == 1.0):
+            return row['Purchase_Value'] * 0.018
+        return row['Purchase_Value'] * (rate if not pd.isna(rate) else 1.0)
+
+    df_raw['Total_Cost_AUD'] = df_raw.apply(calculate_cost_aud, axis=1)
+
+    # Re-aggregate to the format expected by the UI
+    summary = df_raw.groupby(['Ticker', 'Country']).agg(
+        Units=('Units', 'sum'), Total_Cost_AUD=('Total_Cost_AUD', 'sum'),
+        Live_Price=('Live_Price', 'max'), Oldest_Purchase=('Purchase_Date', 'min'),
+        Newest_Purchase=('Purchase_Date', 'max')
+    ).reset_index()
+    return summary
 
 def get_latest_super_balance():
     """Fetches the most recent balance for each super fund."""
