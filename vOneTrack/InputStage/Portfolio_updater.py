@@ -1,5 +1,5 @@
 import psycopg2
-import time
+import time as time_module
 import yfinance as yf
 import os
 import pandas as pd
@@ -85,13 +85,13 @@ class PortfolioUpdater:
         """Runs the price refresh in a loop every X seconds."""
         while True:
             try:
-                print(f"🔄 Background Sync Started at {time.strftime('%H:%M:%S')}")
+                print(f"🔄 Background Sync Started at {time_module.strftime('%H:%M:%S')}")
                 self.refresh_live_prices()
                 # Also sync your AUD rates here if needed
 
                 with open("last_sync.txt", "w") as f:
-                    f.write(time.strftime("%H:%M:%S"))
-                time.sleep(interval_seconds)
+                    f.write(time_module.strftime("%H:%M:%S"))
+                time_module.sleep(interval_seconds)
             except Exception as e:
                 print(f"❌ Background Sync Error: {e}")
-                time.sleep(60) # Wait a bit before retrying if it fails
+                time_module.sleep(60) # Wait a bit before retrying if it fails

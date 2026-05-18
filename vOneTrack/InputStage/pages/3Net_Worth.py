@@ -192,3 +192,84 @@ def show_performance_summary(df):
         'Total Return ($)': '${:,.2f}', 'Total Return (%)': '{:.2f}%'
     }))
     return df
+
+def show_stacked_growth_bar(df):
+    """Displays bar chart of Invested vs Growth."""
+    st.divider()
+    st.subheader("📊 Ticker Value: Invested vs. Growth (AUD)")
+    df_sorted = df.sort_values('Value_AUD', ascending=False)
+    fig = go.Figure()
+    fig.add_trace(go.Bar(x=df_sorted['Ticker'], y=df_sorted['Cost_AUD'], name='Invested', marker_color='#1f77b4'))
+    fig.add_trace(go.Bar(x=df_sorted['Ticker'], y=df_sorted['Profit_AUD'], name='Growth', marker_color='#2ca02c',
+                        text=df_sorted['Return_Pct'].round(1).astype(str) + "%", textposition='outside'))
+    fig.update_layout(barmode='stack', template="plotly_white", yaxis=dict(tickprefix="$"))
+    st.plotly_chart(fig, width='stretch')
+
+# --- 6. MAIN EXECUTION & TABS ---
+
+st.title("💰 Net Worth & Portfolio Analytics")
+
+# Define Tabs
+tab_overview, tab_analytics = st.tabs(["📊 Portfolio Overview", "📈 Ticker Performance Journey"])
+
+# Data Preparation
+df_raw = get_investment_data()
+
+if not df_raw.empty:
+    # --- TAB 1: PORTFOLIO OVERVIEW ---
+    with tab_overview:
+        df = show_performance_summary(df_raw)
+        
+        # Years Holding Period Calculation
+        today = datetime.now()
+        df['Oldest_P'] = pd.to_datetime(df['Oldest_Purchase'], errors='coerce')
+        df['Age (Years)'] = ((today - df['Oldest_P']).dt.days / 365.25).fillna(0).map(lambda x: f"{x:.1f} years")
+
+        # Get Sparkline Data
+        with st.spinner("Loading market trends..."):
+            df = get_portfolio_with_history(df)
+
+        st.subheader("📊 Consolidated Portfolio Analytics")
+        st.dataframe(
+            df.style.map(lambda x: f'color: {"#d62728" if x < 0 else "#2ca02c"}; font-weight: bold;', subset=['Profit_AUD', 'Return_Pct']),
+            column_config={
+                "Units": st.column_config.NumberColumn("Units", format="%.0f"),
+                "Live_Price": st.column_config.NumberColumn("Live Price", format="$%.2f"),
+                "7D Trend": st.column_config.LineChartColumn("7D History"),
+                "Value_AUD": st.column_config.NumberColumn("Value (AUD)", format="$%.2f"),
+                "Profit_AUD": st.column_config.NumberColumn("Profit", format="$%.2f"),
+                "Return_Pct": st.column_config.NumberColumn("Return %", format="%.2f%%"),
+            },
+            column_order=("Ticker", "7D Trend", "Units", "Live_Price", "Value_AUD", "Profit_AUD", "Return_Pct", "Age (Years)"),
+            hide_index=True, width='stretch'
+        )
+        
+        show_stacked_growth_bar(df)
+
+    # --- TAB 2: TICKER PERFORMANCE JOURNEY ---
+    with tab_analytics:
+        st.subheader("🚀 Ticker Performance Journey")
+        st.caption("Visualise price movement and purchase points from your first trade.")
+        
+        all_tickers = df_raw['Ticker'].unique().tolist()
+
+        if all_tickers:
+            selected = st.selectbox("Select Ticker to Analyse", all_tickers, key="trend_selector")
+            
+            # Fetch country for suffix logic
+            ticker_info = df_raw[df_raw['Ticker'] == selected].iloc[0]
+            
+            with st.spinner(f"Fetching journey for {selected}..."):
+                fig = plot_ticker_performance(selected, ticker_info['Country'])
+            
+            if fig:
+                st.plotly_chart(fig, width='stretch')
+            else:
+                st.info(f"Market data for {selected} is currently unavailable.")
+else:
+    st.warning("No investment data found. Please add assets in the Input Stage.")
+
+# Sidebar Actions
+if st.sidebar.button("📤 Manual Sync to Google Sheets"):
+    upload_db_to_sheet()
+    st.sidebar.success("Sync complete!")
