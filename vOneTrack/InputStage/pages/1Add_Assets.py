@@ -76,7 +76,7 @@ def add_investment(ticker, units, price, date, country, currency, inv_type):
     # Get exchange rate if needed
     updater = PortfolioUpdater()
     rates = updater.get_live_exchange_rates()
-    exch_rate = rates.get(country, 1.0)
+    exch_rate = rates.get(country, 0.018 if country == 'IND' else 1.0)
 
     try:
         pg_keys = ["host", "port", "database", "user", "password", "options"]

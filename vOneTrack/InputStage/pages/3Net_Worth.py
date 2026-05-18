@@ -56,8 +56,8 @@ def get_portfolio_with_history(df):
 def get_investment_data():
     """Aggregates investment data from SQLite."""
     engine = get_engine()
-    query = """
-    SELECT "Ticker", "Country", SUM("Units") as "Units", SUM("Purchase_Value") as "Total_Cost_AUD",
+    query = """ 
+    SELECT "Ticker", "Country", SUM("Units") as "Units", SUM("Purchase_Value" * COALESCE("Exchange_Rate", 1.0)) as "Total_Cost_AUD",
            MAX("Live_Price") as "Live_Price", MIN("Purchase_Date") as "Oldest_Purchase",
            MAX("Purchase_Date") as "Newest_Purchase"
     FROM "Investment" 
@@ -125,109 +125,70 @@ def show_performance_summary(df):
     updater = PortfolioUpdater()
     rates = updater.get_live_exchange_rates()
     
+    # Ensure IND rate is handled (approx fallback if updater missing it)
+    if 'IND' not in rates:
+        rates['IND'] = 0.018 # 1 INR ≈ 0.018 AUD
+
     df['Rate'] = df['Country'].map(rates).fillna(1.0)
     df['Cost_AUD'] = df['Total_Cost_AUD'] 
     df['Value_AUD'] = (df['Units'] * df['Live_Price']) * df['Rate']
     df['Profit_AUD'] = df['Value_AUD'] - df['Cost_AUD']
     df['Return_Pct'] = (df['Profit_AUD'] / df['Cost_AUD']) * 100
     
-    summary = df.groupby('Country').agg({'Value_AUD': 'sum', 'Cost_AUD': 'sum'}).reset_index()
-    summary.columns = ['Region', 'Total Asset Value', 'Total Cost']
+    # Calculate regional sums for investments
+    investment_regional_summary = df.groupby('Country').agg(
+        Total_Asset_Value=('Value_AUD', 'sum'),
+        Total_Cost=('Cost_AUD', 'sum')
+    ).reset_index()
+    investment_regional_summary.rename(columns={'Country': 'Region'}, inplace=True)
 
-    latest_super = get_latest_super_balance()
-    super_row = pd.DataFrame([['SUPERANNUATION', latest_super, latest_super]], columns=summary.columns)
+    # Initialize list to hold all summary rows
+    summary_rows_list = []
+
+    # Add AUS and USA individual rows
+    aus_usa_df = investment_regional_summary[investment_regional_summary['Region'].isin(['AUS', 'USA'])].copy()
+    if not aus_usa_df.empty:
+        summary_rows_list.append(aus_usa_df)
+
+    # Add AUD + USD Total
+    aud_usd_total_value = aus_usa_df['Total_Asset_Value'].sum()
+    aud_usd_total_cost = aus_usa_df['Total_Cost'].sum()
+    summary_rows_list.append(pd.DataFrame([['AUD + USD Total', aud_usd_total_value, aud_usd_total_cost]], 
+                                     columns=['Region', 'Total Asset Value', 'Total Cost']))
+
+    # Add IND Total
+    ind_df = investment_regional_summary[investment_regional_summary['Region'] == 'IND'].copy()
+    if not ind_df.empty:
+        ind_total_value = ind_df['Total_Asset_Value'].sum()
+        ind_total_cost = ind_df['Total_Cost'].sum()
+        summary_rows_list.append(pd.DataFrame([['IND Total', ind_total_value, ind_total_cost]], 
+                                         columns=['Region', 'Total Asset Value', 'Total Cost']))
     
-    total_val = summary['Total Asset Value'].sum() + latest_super
-    total_cost = summary['Total Cost'].sum() + latest_super
-    total_row = pd.DataFrame([['TOTAL NET WORTH', total_val, total_cost]], columns=summary.columns)
+    # Add Superannuation
+    latest_super = get_latest_super_balance()
+    summary_rows_list.append(pd.DataFrame([['SUPERANNUATION', latest_super, latest_super]], 
+                                     columns=['Region', 'Total Asset Value', 'Total Cost']))
 
-    summary = pd.concat([summary, super_row, total_row], ignore_index=True)
-    summary['Total Return ($)'] = summary['Total Asset Value'] - summary['Total Cost']
-    summary['Total Return (%)'] = (summary['Total Return ($)'] / summary['Total Cost']) * 100
+    # Concatenate all parts into the final display summary
+    display_summary = pd.concat(summary_rows_list, ignore_index=True)
 
-    st.table(summary.style.format({
+    # Calculate Grand Total Net Worth from the base df and super
+    total_net_worth_value = df['Value_AUD'].sum() + latest_super
+    total_net_worth_cost = df['Cost_AUD'].sum() + latest_super
+    
+    total_net_worth_row = pd.DataFrame([['TOTAL NET WORTH', total_net_worth_value, total_net_worth_cost]], 
+                                       columns=['Region', 'Total Asset Value', 'Total Cost'])
+    display_summary = pd.concat([display_summary, total_net_worth_row], ignore_index=True)
+
+    # Calculate returns for all rows in display_summary
+    display_summary['Total Return ($)'] = display_summary['Total Asset Value'] - display_summary['Total Cost']
+    # Avoid division by zero for Total Cost
+    display_summary['Total Return (%)'] = (display_summary['Total Return ($)'] / display_summary['Total Cost'].replace(0, pd.NA)) * 100
+    display_summary['Total Return (%)'] = display_summary['Total Return (%)'].fillna(0) # Fill NA with 0 for cases where Total Cost is 0 (e.g., new super)
+
+
+    st.table(display_summary.style.format({
         'Total Asset Value': '${:,.2f}', 'Total Cost': '${:,.2f}',
         'Total Return ($)': '${:,.2f}', 'Total Return (%)': '{:.2f}%'
     }))
     return df
-
-def show_stacked_growth_bar(df):
-    """Displays bar chart of Invested vs Growth."""
-    st.divider()
-    st.subheader("📊 Ticker Value: Invested vs. Growth (AUD)")
-    df_sorted = df.sort_values('Value_AUD', ascending=False)
-    fig = go.Figure()
-    fig.add_trace(go.Bar(x=df_sorted['Ticker'], y=df_sorted['Cost_AUD'], name='Invested', marker_color='#1f77b4'))
-    fig.add_trace(go.Bar(x=df_sorted['Ticker'], y=df_sorted['Profit_AUD'], name='Growth', marker_color='#2ca02c',
-                        text=df_sorted['Return_Pct'].round(1).astype(str) + "%", textposition='outside'))
-    fig.update_layout(barmode='stack', template="plotly_white", yaxis=dict(tickprefix="$"))
-    st.plotly_chart(fig, width='stretch')
-
-# --- 6. MAIN EXECUTION & TABS ---
-
-st.title("💰 Net Worth & Portfolio Analytics")
-
-# Define Tabs
-tab_overview, tab_analytics = st.tabs(["📊 Portfolio Overview", "📈 Ticker Performance Journey"])
-
-# Data Preparation
-df_raw = get_investment_data()
-
-if not df_raw.empty:
-    # --- TAB 1: PORTFOLIO OVERVIEW ---
-    with tab_overview:
-        df = show_performance_summary(df_raw)
-        
-        # Years Holding Period Calculation
-        today = datetime.now()
-        df['Oldest_P'] = pd.to_datetime(df['Oldest_Purchase'], errors='coerce')
-        df['Age (Years)'] = ((today - df['Oldest_P']).dt.days / 365.25).fillna(0).map(lambda x: f"{x:.1f} years")
-
-        # Get Sparkline Data
-        with st.spinner("Loading market trends..."):
-            df = get_portfolio_with_history(df)
-
-        st.subheader("📊 Consolidated Portfolio Analytics")
-        st.dataframe(
-            df.style.map(lambda x: f'color: {"#d62728" if x < 0 else "#2ca02c"}; font-weight: bold;', subset=['Profit_AUD', 'Return_Pct']),
-            column_config={
-                "Units": st.column_config.NumberColumn("Units", format="%.0f"),
-                "Live_Price": st.column_config.NumberColumn("Live Price", format="$%.2f"),
-                "7D Trend": st.column_config.LineChartColumn("7D History"),
-                "Value_AUD": st.column_config.NumberColumn("Value (AUD)", format="$%.2f"),
-                "Profit_AUD": st.column_config.NumberColumn("Profit", format="$%.2f"),
-                "Return_Pct": st.column_config.NumberColumn("Return %", format="%.2f%%"),
-            },
-            column_order=("Ticker", "7D Trend", "Units", "Live_Price", "Value_AUD", "Profit_AUD", "Return_Pct", "Age (Years)"),
-            hide_index=True, width='stretch'
-        )
-        
-        show_stacked_growth_bar(df)
-
-    # --- TAB 2: TICKER PERFORMANCE JOURNEY ---
-    with tab_analytics:
-        st.subheader("🚀 Ticker Performance Journey")
-        st.caption("Visualise price movement and purchase points from your first trade.")
-        
-        all_tickers = df_raw['Ticker'].unique().tolist()
-
-        if all_tickers:
-            selected = st.selectbox("Select Ticker to Analyse", all_tickers, key="trend_selector")
-            
-            # Fetch country for suffix logic
-            ticker_info = df_raw[df_raw['Ticker'] == selected].iloc[0]
-            
-            with st.spinner(f"Fetching journey for {selected}..."):
-                fig = plot_ticker_performance(selected, ticker_info['Country'])
-            
-            if fig:
-                st.plotly_chart(fig, width='stretch')
-            else:
-                st.info(f"Market data for {selected} is currently unavailable.")
-else:
-    st.warning("No investment data found. Please add assets in the Input Stage.")
-
-# Sidebar Actions
-if st.sidebar.button("📤 Manual Sync to Google Sheets"):
-    upload_db_to_sheet()
-    st.sidebar.success("Sync complete!")
