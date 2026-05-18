@@ -129,50 +129,47 @@ def show_performance_summary(df):
     if 'IND' not in rates:
         rates['IND'] = 0.018 # 1 INR ≈ 0.018 AUD
 
+    # Calculate current values
     df['Rate'] = df['Country'].map(rates).fillna(1.0)
     df['Cost_AUD'] = df['Total_Cost_AUD'] 
     df['Value_AUD'] = (df['Units'] * df['Live_Price']) * df['Rate']
     df['Profit_AUD'] = df['Value_AUD'] - df['Cost_AUD']
     df['Return_Pct'] = (df['Profit_AUD'] / df['Cost_AUD']) * 100
     
-    # Calculate regional sums for investments
+    # 1. Base regional aggregation with consistent column names
     investment_regional_summary = df.groupby('Country').agg(
         Total_Asset_Value=('Value_AUD', 'sum'),
         Total_Cost=('Cost_AUD', 'sum')
     ).reset_index()
-    investment_regional_summary.rename(columns={'Country': 'Region'}, inplace=True)
+    investment_regional_summary.columns = ['Region', 'Total Asset Value', 'Total Cost']
 
-    # Initialize list to hold all summary rows
     summary_rows_list = []
 
-    # Add AUS and USA individual rows
+    # 2. Add individual AUS and USA rows
     aus_usa_df = investment_regional_summary[investment_regional_summary['Region'].isin(['AUS', 'USA'])].copy()
     if not aus_usa_df.empty:
         summary_rows_list.append(aus_usa_df)
 
-    # Add AUD + USD Total
-    aud_usd_total_value = aus_usa_df['Total_Asset_Value'].sum()
-    aud_usd_total_cost = aus_usa_df['Total_Cost'].sum()
+    # 3. Add AUD + USD Total
+    aud_usd_total_value = aus_usa_df['Total Asset Value'].sum()
+    aud_usd_total_cost = aus_usa_df['Total Cost'].sum()
     summary_rows_list.append(pd.DataFrame([['AUD + USD Total', aud_usd_total_value, aud_usd_total_cost]], 
                                      columns=['Region', 'Total Asset Value', 'Total Cost']))
 
-    # Add IND Total
+    # 4. Add IND Total
     ind_df = investment_regional_summary[investment_regional_summary['Region'] == 'IND'].copy()
     if not ind_df.empty:
-        ind_total_value = ind_df['Total_Asset_Value'].sum()
-        ind_total_cost = ind_df['Total_Cost'].sum()
-        summary_rows_list.append(pd.DataFrame([['IND Total', ind_total_value, ind_total_cost]], 
+        summary_rows_list.append(pd.DataFrame([['IND Total', ind_df['Total Asset Value'].sum(), ind_df['Total Cost'].sum()]], 
                                          columns=['Region', 'Total Asset Value', 'Total Cost']))
     
-    # Add Superannuation
+    # 5. Add Superannuation
     latest_super = get_latest_super_balance()
     summary_rows_list.append(pd.DataFrame([['SUPERANNUATION', latest_super, latest_super]], 
                                      columns=['Region', 'Total Asset Value', 'Total Cost']))
 
-    # Concatenate all parts into the final display summary
     display_summary = pd.concat(summary_rows_list, ignore_index=True)
 
-    # Calculate Grand Total Net Worth from the base df and super
+    # 6. Calculate Grand Total Net Worth
     total_net_worth_value = df['Value_AUD'].sum() + latest_super
     total_net_worth_cost = df['Cost_AUD'].sum() + latest_super
     
