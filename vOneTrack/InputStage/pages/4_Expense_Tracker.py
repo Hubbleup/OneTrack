@@ -5,7 +5,7 @@ import pdfplumber
 import re
 from datetime import datetime
 import io
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 import urllib.parse
 
 # --- 1. DATABASE SETUP & UTILITIES ---
@@ -30,7 +30,7 @@ def init_db_tables():
     if not engine: return
 
     with engine.connect() as conn:
-        conn.execute("""
+        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS "Liabilities" (
                 "id" SERIAL PRIMARY KEY,
                 "name" TEXT NOT NULL,
@@ -39,8 +39,8 @@ def init_db_tables():
                 "last_updated" DATE NOT NULL,
                 "created_at" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """)
-        conn.execute("""
+        """))
+        conn.execute(text("""
             CREATE TABLE IF NOT EXISTS "Expenses" (
                 "id" SERIAL PRIMARY KEY,
                 "expense_date" DATE NOT NULL,
@@ -50,16 +50,16 @@ def init_db_tables():
                 "description" TEXT,
                 "created_at" TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
-        """)
+        """))
         # Sync sequences
-        conn.execute("""
+        conn.execute(text("""
             SELECT setval(pg_get_serial_sequence('public."Liabilities"', 'id'), 
                           COALESCE((SELECT MAX("id") FROM "Liabilities"), 0) + 1, false);
-        """)
-        conn.execute("""
+        """))
+        conn.execute(text("""
             SELECT setval(pg_get_serial_sequence('public."Expenses"', 'id'), 
                           COALESCE((SELECT MAX("id") FROM "Expenses"), 0) + 1, false);
-        """)
+        """))
 
 def save_liability(name, l_type, balance, updated_date):
     """Saves a new liability or updates an existing one by name."""
@@ -68,12 +68,12 @@ def save_liability(name, l_type, balance, updated_date):
     try:
         with engine.connect() as conn:
             # Check if liability with this name exists
-            res = conn.execute('SELECT id FROM "Liabilities" WHERE name = %s', (name,)).fetchone()
+            res = conn.execute(text('SELECT id FROM "Liabilities" WHERE name = :name'), {'name': name}).fetchone()
             if res: # Update
-                conn.execute('UPDATE "Liabilities" SET balance = %s, last_updated = %s WHERE id = %s', (balance, updated_date, res[0]))
+                conn.execute(text('UPDATE "Liabilities" SET balance = :balance, last_updated = :last_updated WHERE id = :id'), {'balance': balance, 'last_updated': updated_date, 'id': res[0]})
             else: # Insert
-                conn.execute('INSERT INTO "Liabilities" (name, type, balance, last_updated) VALUES (%s, %s, %s, %s)',
-                             (name, l_type, balance, updated_date))
+                conn.execute(text('INSERT INTO "Liabilities" (name, type, balance, last_updated) VALUES (:name, :type, :balance, :last_updated)'),
+                             {'name': name, 'type': l_type, 'balance': balance, 'last_updated': updated_date})
         return True
     except Exception as e:
         st.error(f"Error saving liability: {e}")
