@@ -96,6 +96,18 @@ def get_latest_super_balance():
     except:
         return 0.0
 
+def get_total_liabilities():
+    """Fetches the sum of all liability balances."""
+    engine = get_engine()
+    try:
+        # Ensure the Liabilities table exists before querying
+        query = 'SELECT SUM("balance") as "Total_Liabilities" FROM "Liabilities"'
+        df = pd.read_sql_query(query, engine)
+        return df['Total_Liabilities'].iloc[0] if not df.empty and df['Total_Liabilities'].iloc[0] is not None else 0.0
+    except Exception:
+        # This will happen if the table doesn't exist yet, which is fine.
+        return 0.0
+
 # --- 5. PLOTTING & DISPLAY FUNCTIONS ---
 
 def plot_ticker_performance(ticker, country):
@@ -180,11 +192,16 @@ def show_performance_summary(df):
     latest_super = get_latest_super_balance()
     summary_rows_list.append(pd.DataFrame([['SUPERANNUATION', latest_super, latest_super]], 
                                      columns=['Region', 'Total Asset Value', 'Total Cost']))
+    
+    # 6. Add Liabilities (as a negative value)
+    total_liabilities = get_total_liabilities()
+    summary_rows_list.append(pd.DataFrame([['LIABILITIES (Loans/Mortgage)', -total_liabilities, 0]],
+                                     columns=['Region', 'Total Asset Value', 'Total Cost']))
 
     display_summary = pd.concat(summary_rows_list, ignore_index=True)
 
-    # 6. Calculate Grand Total Net Worth
-    total_net_worth_value = df['Value_AUD'].sum() + latest_super
+    # 7. Calculate Grand Total Net Worth
+    total_net_worth_value = df['Value_AUD'].sum() + latest_super - total_liabilities
     total_net_worth_cost = df['Cost_AUD'].sum() + latest_super
     
     total_net_worth_row = pd.DataFrame([['TOTAL NET WORTH', total_net_worth_value, total_net_worth_cost]], 
