@@ -1,0 +1,10 @@
+    vOneTrack/InputStage/pages/secrets.toml
+vOneTrack/InputStage/.streamlit/secrets.toml
+.DS_Store
+.DS_Store
+vOneTrack/DB/Dividends.csv
+vOneTrack/DB/Investment_olds.csv
+vOneTrack/DB/Investment.csv
+vOneTrack/DB/Investmentbackup.csv
+vOneTrack/DB/Super_Tracking.csv
+vOneTrack/InputStage/pages/secrets.toml
