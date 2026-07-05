@@ -6,6 +6,8 @@ import re
 from datetime import datetime
 import io
 from sqlalchemy import create_engine, text
+from pdf2image import convert_from_bytes
+import pytesseract
 import logging
 import sys
 import urllib.parse
@@ -108,30 +110,45 @@ def save_expense(expense_date, vendor, category, amount, description):
 
 
 def extract_expense_from_pdf(file):
-    """Extracts total amount and vendor from a PDF receipt."""
+    """Extracts total amount and vendor from a PDF receipt, with OCR fallback."""
     extracted_data = {'amount': None, 'vendor': None}
-    # A simple list of known vendors. This can be expanded.
     known_vendors = ["Bunnings", "Woolworths", "Coles", "Officeworks", "AGL", "Telstra", "Optus", "Vodafone", "Amaysim"]
+    text = ""
+    pdf_bytes = file.getvalue()
 
     try:
-        with pdfplumber.open(io.BytesIO(file.getvalue())) as pdf:
-            text = ""
+        # --- Method 1: Try text extraction with pdfplumber ---
+        with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
             for page in pdf.pages:
-                text += page.extract_text()
-            logger.info(f"--- Extracted PDF Text ---\n{text}\n--------------------------")
+                page_text = page.extract_text()
+                if page_text:
+                    text += page_text + "\n"
+        
+        logger.info("--- Extracted PDF Text (pdfplumber) ---")
 
-            # 1. Regex to find 'Total', 'Total Amount', etc., and capture the following number
-            match = re.search(r'Total(?: Amount)?[:\s]*\$?([\d,]+\.\d{2})', text, re.IGNORECASE)
-            if match:
-                extracted_data['amount'] = float(match.group(1).replace(',', ''))
+        # --- Method 2: Fallback to OCR if text is minimal/empty ---
+        if len(text.strip()) < 20: # Heuristic: if very little text, it's likely an image
+            logger.info("Minimal text found. Falling back to OCR.")
+            images = convert_from_bytes(pdf_bytes)
+            ocr_text = ""
+            for img in images:
+                ocr_text += pytesseract.image_to_string(img) + "\n"
+            text = ocr_text
+            logger.info("--- Extracted PDF Text (OCR) ---")
 
-            # 2. Search for a known vendor in the text
-            for vendor in known_vendors:
-                # Using regex with word boundaries (\b) to avoid partial matches (e.g., 'art' in 'Bunnings Mart')
-                if re.search(r'\b' + vendor + r'\b', text, re.IGNORECASE):
-                    extracted_data['vendor'] = vendor
-                    break # Stop after finding the first match
-            logger.info(f"Extraction result: {extracted_data}")
+        logger.info(f"--- Final Extracted Text ---\n{text}\n--------------------------")
+
+        # 1. Regex to find 'Total', 'Total Amount', etc., and capture the following number
+        match = re.search(r'Total(?: Amount| Price)?[:\s]*\$?([\d,]+\.\d{2})', text, re.IGNORECASE)
+        if match:
+            extracted_data['amount'] = float(match.group(1).replace(',', ''))
+
+        # 2. Search for a known vendor in the text
+        for vendor in known_vendors:
+            if re.search(r'\b' + vendor + r'\b', text, re.IGNORECASE):
+                extracted_data['vendor'] = vendor
+                break
+        logger.info(f"Extraction result: {extracted_data}")
 
     except Exception as e:
         logger.error(f"PDF parsing failed with an exception: {e}", exc_info=True)
