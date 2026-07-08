@@ -29,6 +29,17 @@ def handle_unauthorized():
 
 def check_auth():
     """Centralized function to verify authentication state on every page."""
+    # --- LOCAL DEVELOPMENT BYPASS ---
+    # If not in production (i.e., is_prod secret is not true), this will
+    # bypass the login for easier local testing.
+    if not st.secrets.get("is_prod"):
+        if "authenticated" not in st.session_state:
+            st.session_state["authenticated"] = True
+            # Set a mock user for local development
+            st.session_state["user"] = {"email": "local.dev@example.com"}
+        return # Skip the rest of the authentication logic
+    # --- END BYPASS ---
+
     if "authenticated" not in st.session_state:
         st.session_state["authenticated"] = False
 
@@ -96,6 +107,14 @@ def show_login_page():
 
     # Ensure we use the base Supabase URL (https://xyz.supabase.co) and not the REST API URL
     supabase_url = st.secrets["supabase"]["url"].strip().split("/rest/v1")[0].rstrip("/")
+    # Robustly determine the Supabase URL.
+    if "url" in st.secrets["supabase"]:
+        # Preferred method: Use the full REST URL if provided.
+        supabase_url = st.secrets["supabase"]["url"].strip().split("/rest/v1")[0].rstrip("/")
+    else:
+        # Fallback method: Construct from the database host.
+        db_host = st.secrets["supabase"]["host"]
+        supabase_url = f"https://{db_host.split('.')[1]}.supabase.co"
     
     # Dynamically detect if we are running locally or on Streamlit Cloud
     if st.secrets.get("is_prod"):
