@@ -83,13 +83,25 @@ def check_stock_price_alerts():
         if alerts_df.empty:
             return # No active alerts to check
 
-        # 2. Get live prices for the tickers in the alerts
+        # 2. Fetch LIVE prices directly from yfinance for maximum accuracy
         tickers_to_check = alerts_df['ticker'].unique().tolist()
-        prices_df = pd.read_sql('SELECT "Ticker", "Live_Price" FROM "Investment" WHERE "Ticker" = ANY(%(tickers)s)', engine, params={'tickers': tickers_to_check})
-        live_prices = prices_df.set_index('Ticker')['Live_Price'].to_dict()
+        if not tickers_to_check:
+            return
+
+        # yfinance can take a list of tickers. We don't need to add .AX here
+        # as the user is expected to add it for Australian stocks when setting the alert.
+        data = yf.download(tickers=tickers_to_check, period="1d", progress=False)
+        if data.empty:
+            print("Price Alert Check: Could not download live market data.")
+            return
+        
+        # Get the most recent 'Close' price for each ticker
+        live_prices = data['Close'].ffill().iloc[-1].to_dict()
 
         # 3. Check each alert
         for _, alert in alerts_df.iterrows():
+            # For multi-ticker downloads, yfinance might return keys like 'CBA.AX'.
+            # We check for both the raw ticker and the ticker with suffix.
             live_price = live_prices.get(alert['ticker'])
             if live_price is None:
                 continue

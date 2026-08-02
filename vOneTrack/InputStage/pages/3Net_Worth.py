@@ -68,7 +68,7 @@ if 'event_sync_started' not in st.session_state:
                 morning_check_done = True
             
             # --- Evening Price Target Alert Check (around 5 PM) ---
-            if now.hour == 17 and now.minute == 44 and not evening_check_done:
+            if now.hour == 17 and now.minute == 49 and not evening_check_done:
                 print("--- Running Evening Price Target Alert Check ---")
                 # Also send the daily summary in the evening
                 send_daily_stock_summary()
