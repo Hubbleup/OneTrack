@@ -313,7 +313,7 @@ with tab_dashboard:
             st.dataframe(
                 cashflow_summary_df.style.format({
                     'Annual Income': '${:,.2f}', 'Annual Expenses': '${:,.2f}', 'Net Cash Flow': '${:,.2f}'
-                }).applymap(lambda x: 'color: red' if x < 0 else 'color: green', subset=['Net Cash Flow']),
+                }).map(lambda x: 'color: red' if x < 0 else 'color: green', subset=['Net Cash Flow']),
                 use_container_width=True, hide_index=True
             )
             total_net_cashflow = cashflow_summary_df['Net Cash Flow'].sum()
@@ -569,7 +569,7 @@ with tab_cashflow:
                             gearing_df = pd.DataFrame(gearing_data)
 
                             st.dataframe(
-                                gearing_df.style.format({'Amount': '${:,.2f}'}).applymap(
+                                gearing_df.style.format({'Amount': '${:,.2f}'}).map(
                                     lambda x: 'color: red' if x < 0 else 'color: green', subset=pd.IndexSlice[[2, 4, 6], ['Amount']]
                                 ),
                                 use_container_width=True, hide_index=True

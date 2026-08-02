@@ -132,7 +132,7 @@ def check_website_for_events():
             if today_str in event_date and "CPI" in event_name.upper():
                 subject = f"Economic Event Alert: {event_name}"
                 body = f"An important economic event is scheduled for today:\n\nEvent: {event_name}\nDate: {event_date}\n\nSource: {URL}"
-                send_email_alert(subject, body, st.secrets["email"]["recipient_email"])
+                send_email_alert(subject, body)
 
     except Exception as e:
         print(f"Failed to scrape or process website events: {e}")
