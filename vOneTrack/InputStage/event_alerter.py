@@ -22,18 +22,26 @@ def send_email_alert(subject, body, to_email=None):
         smtp_server = st.secrets["email"]["smtp_server"]
         smtp_port = st.secrets["email"]["smtp_port"]
 
+        # Handle single string or list of strings for recipients
+        if isinstance(to_email, list):
+            recipients = to_email
+            to_header = ", ".join(recipients) # For display in email clients
+        else:
+            recipients = [to_email]
+            to_header = to_email
+
         # Create the email
-        msg = MIMEText(body, 'html') # Set body type to HTML
+        msg = MIMEText(body, 'html')
         msg['Subject'] = subject
         msg['From'] = sender_email
-        msg['To'] = to_email
+        msg['To'] = to_header
 
         # Send the email
         with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
             server.login(sender_email, sender_password)
-            server.sendmail(sender_email, [to_email], msg.as_string())
+            server.sendmail(sender_email, recipients, msg.as_string())
         st.toast(f"Alert sent for: {subject}")
-        print(f"Email alert sent to {to_email} for: {subject}")
+        print(f"Email alert sent to {', '.join(recipients)} for: {subject}")
         return True
     except Exception as e:
         print(f"Error sending email: {e}")
