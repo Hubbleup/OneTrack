@@ -5,20 +5,23 @@ import plotly.express as px
 import plotly.graph_objects as go
 import yfinance as yf
 from datetime import datetime
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 import urllib.parse
 import threading
 import os
+import time as time_module
 import sys
 
 # --- 1. SETUP & PATHS ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
-if current_dir not in sys.path:
-    sys.path.insert(0, current_dir)
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
 
 # Internal Imports
 from Portfolio_updater import PortfolioUpdater 
-from uploadtoGSfromDB import upload_db_to_sheet
+from uploadtoGSfromDB import upload_db_to_sheet # This import seems unused here, but we'll leave it.
+from event_alerter import check_stock_price_alerts, init_price_alerts_table, send_daily_stock_summary
 from utils import show_sync_status, get_db_engine
 
 # --- 2. BACKGROUND SYNC ENGINE ---
@@ -29,14 +32,58 @@ if 'sync_started' not in st.session_state:
     thread.start()
     st.session_state.sync_started = True
 
+if 'event_sync_started' not in st.session_state:
+    def run_scheduled_checks():
+        """
+        Runs checks at scheduled times.
+        - Daily Summary: Runs once a day in the morning.
+        - Price Target Alerts: Runs twice a day (morning and evening).
+        """
+        today = datetime.now().date()
+        morning_check_done = False
+        evening_check_done = False
+        daily_summary_sent = False
+        while True:
+            now = datetime.now()
+            current_date = now.date()
+
+            # Reset daily flags if it's a new day
+            if current_date > today:
+                today = current_date
+                morning_check_done = False
+                evening_check_done = False
+                daily_summary_sent = False
+
+            # --- Morning Checks (around 9 AM) ---
+            if now.hour == 9 and not morning_check_done:
+                # Send the main daily summary email
+                if not daily_summary_sent:
+                    print("--- Sending Daily Portfolio Summary Email ---")
+                    send_daily_stock_summary()
+                    daily_summary_sent = True
+
+                # Check for specific price target alerts
+                print("--- Running Morning Price Target Alert Check ---")
+                check_stock_price_alerts()
+                morning_check_done = True
+            
+            # --- Evening Price Target Alert Check (around 5 PM) ---
+            if now.hour == 17 and not evening_check_done:
+                print("--- Running Evening Price Target Alert Check ---")
+                check_stock_price_alerts()
+                evening_check_done = True
+
+            time_module.sleep(600) # Sleep for 10 minutes before checking the time again
+
+    alert_thread = threading.Thread(target=run_scheduled_checks, daemon=True)
+    alert_thread.start()
+    st.session_state.event_sync_started = True
+
 # --- 3. PAGE CONFIG ---
 st.set_page_config(page_title="Net Worth Tracker", layout="wide", page_icon="💹")
 show_sync_status() 
 
 # --- 4. DATA FETCHING FUNCTIONS ---
-
-def get_engine():
-    return get_db_engine()
 
 @st.cache_data(ttl=3600)
 def get_portfolio_with_history(df):
@@ -55,7 +102,7 @@ def get_portfolio_with_history(df):
 
 def get_investment_data():
     """Aggregates investment data from SQLite."""
-    engine = get_engine()
+    engine = get_db_engine()
     # Fetch raw data to apply conditional logic in Python for historical conversions
     query = """
     SELECT "Ticker", "Country", "Units", "Purchase_Value", "Exchange_Rate", "Live_Price", "Purchase_Date"
@@ -83,7 +130,7 @@ def get_investment_data():
 
 def get_latest_super_balance():
     """Fetches the most recent balance for each super fund."""
-    engine = get_engine()
+    engine = get_db_engine()
     try:
         query = """
         SELECT SUM(value_aud) as "Total_Super" FROM (
@@ -98,7 +145,7 @@ def get_latest_super_balance():
 
 def get_total_liabilities():
     """Fetches the sum of all liability balances."""
-    engine = get_engine()
+    engine = get_db_engine()
     try:
         # Ensure the Liabilities table exists before querying
         query = 'SELECT SUM("balance") as "Total_Liabilities" FROM "Liabilities"'
@@ -112,7 +159,7 @@ def get_total_liabilities():
 
 def plot_ticker_performance(ticker, country):
     """Generates the 'Journey' chart showing price trend and purchase points."""
-    engine = get_engine() # Use the SQLAlchemy engine
+    engine = get_db_engine() # Use the SQLAlchemy engine
     trades = pd.read_sql(
         'SELECT "Purchase_Date", "Purchase_Price", "Units" FROM "Investment" WHERE "Ticker"=%s ORDER BY "Purchase_Date" ASC', 
         engine, params=(ticker,)
@@ -238,7 +285,7 @@ def show_stacked_growth_bar(df):
 st.title("💰 Net Worth & Portfolio Analytics")
 
 # Define Tabs
-tab_overview, tab_analytics = st.tabs(["📊 Portfolio Overview", "📈 Ticker Performance Journey"])
+tab_overview, tab_analytics, tab_alerts = st.tabs(["📊 Portfolio Overview", "📈 Ticker Performance Journey", "🔔 Price Alerts"])
 
 # Data Preparation
 df_raw = get_investment_data()
@@ -296,6 +343,63 @@ if not df_raw.empty:
                 st.info(f"Market data for {selected} is currently unavailable.")
 else:
     st.warning("No investment data found. Please add assets in the Input Stage.")
+
+# --- TAB 3: PRICE ALERTS ---
+with tab_alerts:
+    st.subheader("🔔 Manage Stock Price Alerts")
+    init_price_alerts_table() # Ensure table exists
+
+    # The form is now always available, regardless of whether the portfolio is empty.
+    with st.form("add_alert_form", clear_on_submit=True):
+        st.markdown("##### Create a New Alert")
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            # Changed to a text input to allow any stock ticker.
+            alert_ticker = st.text_input("Enter Ticker Symbol", placeholder="e.g., NVDA or CBA.AX")
+        with c2:
+            alert_condition = st.selectbox("Condition", ["Price goes ABOVE", "Price goes BELOW"])
+        with c3:
+            alert_price = st.number_input("Target Price ($)", min_value=0.01, format="%.2f")
+
+        if st.form_submit_button("💾 Set Alert", use_container_width=True, type="primary"):
+            if alert_ticker and alert_price > 0:
+                ticker_to_save = alert_ticker.strip().upper()
+                condition = "above" if "ABOVE" in alert_condition else "below"
+                try:
+                    engine = get_db_engine()
+                    with engine.connect() as conn:
+                        conn.execute(text("""
+                            INSERT INTO "PriceAlerts" (ticker, condition, target_price)
+                            VALUES (:ticker, :condition, :price)
+                        """), {'ticker': ticker_to_save, 'condition': condition, 'price': alert_price})
+                        conn.commit()
+                    st.success(f"Alert set for {ticker_to_save} to trigger when price goes {condition} ${alert_price:,.2f}!")
+                except Exception as e:
+                    st.error(f"Failed to save alert: {e}")
+            else:
+                st.warning("Please provide a ticker and a target price.")
+
+    st.divider()
+    st.markdown("##### Current & Past Alerts")
+    try:
+        alerts_history_df = pd.read_sql('SELECT ticker, condition, target_price, status, created_at, triggered_at FROM "PriceAlerts" ORDER BY created_at DESC', get_db_engine())
+        st.dataframe(alerts_history_df.style.format({'target_price': '${:,.2f}'}),
+                     column_config={
+                        "created_at": st.column_config.DatetimeColumn("Set On", format="D MMM YYYY, h:mm A"),
+                        "triggered_at": st.column_config.DatetimeColumn("Triggered On", format="D MMM YYYY, h:mm A"),
+                     },
+                     use_container_width=True, hide_index=True)
+    except Exception as e:
+        st.info(f"No alerts have been set yet. Error: {e}")
+
+    # --- Test Email Button ---
+    st.divider()
+    st.markdown("##### 📧 Email Configuration Test")
+    if st.button("Send Test Email", help="This will send a test email using the credentials in your secrets file."):
+        from event_alerter import send_email_alert
+        subject = "OneTrack - Test Email"
+        body = "<html><body>This is a test email to confirm your SMTP settings are correct. If you received this, your alerts are working!</body></html>"
+        send_email_alert(subject, body)
 
 # Sidebar Actions
 if st.sidebar.button("📤 Manual Sync to Google Sheets"):
