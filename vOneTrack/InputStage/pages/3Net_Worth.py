@@ -68,12 +68,12 @@ if 'event_sync_started' not in st.session_state:
                 morning_check_done = True
             
             # --- Evening Price Target Alert Check (around 5 PM) ---
-            if now.hour == 17 and not evening_check_done:
+            if now.hour == 17 and now.minute == 37 and not evening_check_done:
                 print("--- Running Evening Price Target Alert Check ---")
                 check_stock_price_alerts()
                 evening_check_done = True
 
-            time_module.sleep(600) # Sleep for 10 minutes before checking the time again
+            time_module.sleep(60) # Sleep for 1 minute before checking the time again
 
     alert_thread = threading.Thread(target=run_scheduled_checks, daemon=True)
     alert_thread.start()
