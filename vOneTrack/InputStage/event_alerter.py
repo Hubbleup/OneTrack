@@ -113,8 +113,10 @@ def check_stock_price_alerts():
                 subject = f"🚀 Price Alert Triggered for {alert['ticker']}!"
                 body = f"Heads up! Your price alert for {alert['ticker']} has been triggered.\n\n- Target: {alert['condition'].capitalize()} ${alert['target_price']:,.2f}\n- Current Price: ${live_price:,.2f}\n\nThis alert has now been deactivated."
                 send_email_alert(subject, body)
-                # Deactivate the alert to prevent spam
-                engine.execute(text('UPDATE "PriceAlerts" SET status = \'triggered\', triggered_at = NOW() WHERE id = :id'), {'id': alert['id']})
+                # Deactivate the alert to prevent spam using a connection
+                with engine.connect() as conn:
+                    conn.execute(text('UPDATE "PriceAlerts" SET status = \'triggered\', triggered_at = NOW() WHERE id = :id'), {'id': alert['id']})
+                    conn.commit()
     except Exception as e:
         print(f"Error in check_stock_price_alerts: {e}")
 
