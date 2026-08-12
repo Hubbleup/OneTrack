@@ -30,14 +30,19 @@ def handle_unauthorized():
 def check_auth():
     """Centralized function to verify authentication state on every page."""
     # --- LOCAL DEVELOPMENT BYPASS ---
-    # If not in production (i.e., is_prod secret is not true), this will
-    # bypass the login for easier local testing.
-    if not st.secrets.get("is_prod"):
+    # We explicitly check if `is_prod` is NOT True. This is safer than `not st.secrets.get("is_prod")`
+    # as it handles cases where the secret might be a string "true" vs boolean True.
+    # The `is True` check is strict.
+    if st.secrets.get("is_prod") is not True:
+        # This print statement will show up in your Streamlit Cloud logs.
+        print("Auth: Running in LOCAL DEVELOPMENT mode. Bypassing login.")
         if "authenticated" not in st.session_state:
             st.session_state["authenticated"] = True
             # Set a mock user for local development
             st.session_state["user"] = {"email": "local.dev@example.com"}
         return # Skip the rest of the authentication logic
+    else:
+        print("Auth: Running in PRODUCTION mode. Enforcing login.")
     # --- END BYPASS ---
 
     if "authenticated" not in st.session_state:
