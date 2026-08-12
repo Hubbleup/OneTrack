@@ -3,14 +3,16 @@ import psycopg2
 import pandas as pd
 from sqlalchemy import create_engine
 import urllib.parse
-from auth import check_auth, logout
+from auth import check_auth, display_logout
 
 # Set global page config
 st.set_page_config(page_title="OneTrack Hub", page_icon="📈", layout="wide")
 
-# Authentication Check
+# --- AUTHENTICATION ---
+# This is the primary gatekeeper for the entire app. All other pages
+# will assume authentication has been handled here.
 check_auth()
-logout() # Add logout button to sidebar
+display_logout() # Display user email and logout button
 
 st.title("🛡️ OneTrack Investment Command Centre")
 st.markdown("---")

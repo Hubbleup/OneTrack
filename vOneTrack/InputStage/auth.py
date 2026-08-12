@@ -194,3 +194,12 @@ def logout():
                 del st.session_state[key]
             # Force a rerun to bring the user back to the login page
             st.rerun()
+
+def display_logout():
+    """
+    A simple function to be called on every page (except main_app)
+    to show the user email and logout button. Assumes check_auth() has passed.
+    """
+    if st.session_state.get("authenticated"):
+        st.sidebar.caption(f"Logged in as:\n{st.session_state.get('user', {}).get('email')}")
+        logout()

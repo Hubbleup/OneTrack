@@ -18,9 +18,8 @@ parent_dir = os.path.dirname(current_dir)
 if parent_dir not in sys.path:
     sys.path.append(parent_dir)
 
-from auth import check_auth, logout
-check_auth()
-logout()
+from auth import display_logout
+
 # --- 1. DATABASE SETUP & UTILITIES ---
 
 # --- Logging Setup ---
@@ -373,6 +372,8 @@ def get_category_from_vendor(vendor_name):
 # --- 2. UI & PAGE LOGIC ---
 
 st.set_page_config(page_title="Expense Tracker", layout="wide", page_icon="💳")
+display_logout() # Assumes main_app.py has already handled authentication
+
 st.title("🧾 Expense Logging Console")
 
 # Initialize database tables on first run
