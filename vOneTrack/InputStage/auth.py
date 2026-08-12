@@ -66,7 +66,11 @@ def exchange_code_for_session(auth_url, api_key, auth_code):
 def check_auth():
     """Centralized function to verify authentication state on every page."""
     # --- LOCAL DEVELOPMENT BYPASS ---
-    if str(st.secrets.get("is_prod")).lower() != 'true':
+    # More robust check for the 'is_prod' flag.
+    # It checks the root level first, then falls back to checking inside the [supabase] section.
+    is_prod_flag = st.secrets.get("is_prod", st.secrets.get("supabase", {}).get("is_prod"))
+
+    if str(is_prod_flag).lower() != 'true':
         if "authenticated" not in st.session_state:
             print("Auth: Running in LOCAL DEVELOPMENT mode. Bypassing login.")
             st.session_state["authenticated"] = True
