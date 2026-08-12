@@ -13,6 +13,14 @@ import logging
 import sys
 import urllib.parse
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+from auth import check_auth, logout
+check_auth()
+logout()
 # --- 1. DATABASE SETUP & UTILITIES ---
 
 # --- Logging Setup ---
@@ -540,4 +548,4 @@ with tab_categories:
             st.rerun()
 
     except Exception as e:
-        st.error(f"Could not load category mappings: {e}")
+        st.error(f"Could not load category mappings: {e}" 

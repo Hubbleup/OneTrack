@@ -6,11 +6,20 @@ import yfinance as yf
 from datetime import datetime
 from sqlalchemy import create_engine
 import urllib.parse
-import os
+import os, sys
 from utils import get_db_connection, get_db_engine
 from Calculate_dividend import DividendCalculator
 
 # --- 1. CONFIGURATION ---
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+from auth import check_auth, logout
+
+check_auth()
+logout()
 DB_PATH = None # No longer needed for SQLite
 
 # --- 2. INITIALIZE LOGIC ---

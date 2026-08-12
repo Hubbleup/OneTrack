@@ -21,6 +21,9 @@ if parent_dir not in sys.path:
 # Internal Imports
 from Portfolio_updater import PortfolioUpdater 
 from uploadtoGSfromDB import upload_db_to_sheet # This import seems unused here, but we'll leave it.
+from auth import check_auth, logout
+check_auth()
+logout()
 from event_alerter import check_stock_price_alerts, init_price_alerts_table, send_daily_stock_summary
 from utils import show_sync_status, get_db_engine
 

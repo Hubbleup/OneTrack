@@ -4,7 +4,15 @@ from sqlalchemy import create_engine, text
 from datetime import datetime
 import urllib.parse
 import plotly.graph_objects as go
+import os, sys
 
+current_dir = os.path.dirname(os.path.abspath(__file__))
+parent_dir = os.path.dirname(current_dir)
+if parent_dir not in sys.path:
+    sys.path.append(parent_dir)
+
+from auth import check_auth, logout
+check_auth()
 # --- 1. DATABASE SETUP & UTILITIES ---
 
 def get_engine():
@@ -249,6 +257,7 @@ def get_property_cashflow_summary(df_liabilities):
 
 st.set_page_config(page_title="Liability Tracker", layout="wide", page_icon="🏦")
 st.title("🏦 Liability & Loan Console")
+logout()
 
 init_liabilities_table()
 
