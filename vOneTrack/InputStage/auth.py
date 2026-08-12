@@ -102,8 +102,13 @@ def show_login_page(auth_url, api_key):
     st.title("🔐 OneTrack Investment Hub")
     st.subheader("Please sign in to continue")
 
-    site_url = "https://onetrack.streamlit.app" if st.secrets.get("is_prod") else "http://localhost:8501"
-    redirect_target = f"{site_url}/"
+    # Best Practice: Read the site URL from secrets for better configuration.
+    # Fallback to localhost for local development if the secret is not set.
+    prod_site_url = st.secrets.get("supabase", {}).get("site_url")
+    if str(st.secrets.get("is_prod")).lower() == 'true' and not prod_site_url:
+        st.error("Configuration Error: `site_url` is missing from `[supabase]` secrets.")
+        st.stop()
+    redirect_target = prod_site_url if str(st.secrets.get("is_prod")).lower() == 'true' else "http://localhost:8501/"
 
     tab1, tab2 = st.tabs(["📧 Email OTP", "🌐 Google Auth"])
 
