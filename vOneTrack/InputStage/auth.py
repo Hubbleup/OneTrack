@@ -5,13 +5,10 @@ def is_authorized(email):
     """
     Checks if the email is in the authorized list.
     In production, move this list to st.secrets for security.
+    This version prioritizes looking inside the [supabase] section first.
     """
-    # Check root level first
-    authorized_emails = st.secrets.get("authorized_users")
-    
-    # If not found at root, check inside the [supabase] section (matches your secrets.toml structure)
-    if authorized_emails is None:
-        authorized_emails = st.secrets.get("supabase", {}).get("authorized_users", [])
+    # Look for authorized_users inside the [supabase] section as per your secrets.toml
+    authorized_emails = st.secrets.get("supabase", {}).get("authorized_users", [])
 
     if not authorized_emails:
         st.error("Security Error: No authorized users configured in secrets.")
@@ -30,10 +27,10 @@ def handle_unauthorized():
 def check_auth():
     """Centralized function to verify authentication state on every page."""
     # --- LOCAL DEVELOPMENT BYPASS ---
-    # We explicitly check if `is_prod` is NOT True. This is safer than `not st.secrets.get("is_prod")`
-    # as it handles cases where the secret might be a string "true" vs boolean True.
-    # The `is True` check is strict.
-    if st.secrets.get("is_prod") is not True:
+    # This check is more robust. It handles if the secret is a boolean (True)
+    # or a string ("true", "True", etc.) by converting to a lowercase string.
+    # It will only bypass if the secret is missing, False, or something other than "true".
+    if str(st.secrets.get("is_prod")).lower() != 'true':
         # This print statement will show up in your Streamlit Cloud logs.
         print("Auth: Running in LOCAL DEVELOPMENT mode. Bypassing login.")
         if "authenticated" not in st.session_state:
