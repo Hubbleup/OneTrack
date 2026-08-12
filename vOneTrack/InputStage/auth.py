@@ -32,7 +32,7 @@ def get_supabase_auth_url():
     return f"{base_url}/auth/v1"
 
 def exchange_code_for_session(auth_url, api_key, auth_code):
-    """Exchanges a PKCE auth code for a user session."""
+    """Exchanges a PKCE auth code for a user session. Returns True on success."""
     try:
         res = requests.post(
             f"{auth_url}/token?grant_type=pkce",
@@ -52,13 +52,16 @@ def exchange_code_for_session(auth_url, api_key, auth_code):
             # Clean up session state after successful login
             st.session_state.pop("code_verifier", None)
             st.session_state.pop("otp_sent", None)
-            st.query_params.clear()
-            st.rerun()
+            st.session_state.pop("auth_attempted", None)
+            st.query_params.clear() # CRITICAL: Clear URL params
+            return True
         else:
             handle_unauthorized()
+            return False
     except requests.exceptions.RequestException as e:
         st.error(f"Authentication failed: {e}")
         st.session_state.pop("code_verifier", None) # Clear verifier on failure
+        return False
 
 def check_auth():
     """Centralized function to verify authentication state on every page."""
@@ -77,10 +80,13 @@ def check_auth():
     auth_url = get_supabase_auth_url()
     api_key = st.secrets["supabase"]["anon_key"]
 
-    # Check if returning from Google OAuth with a code
-    if "code" in st.query_params and not st.session_state["authenticated"]:
+    # Check if returning from Google OAuth with a code.
+    # Use a flag to ensure this is only attempted once.
+    if "code" in st.query_params and not st.session_state.get("auth_attempted"):
+        st.session_state["auth_attempted"] = True
         auth_code = st.query_params["code"]
-        exchange_code_for_session(auth_url, api_key, auth_code)
+        if exchange_code_for_session(auth_url, api_key, auth_code):
+            st.rerun() # Force a rerun into the authenticated state
 
     # Verify email after authentication is established
     if st.session_state.get("authenticated"):
@@ -89,7 +95,7 @@ def check_auth():
             handle_unauthorized()
 
     # If not authenticated, show login page and stop
-    if not st.session_state["authenticated"]:
+    if not st.session_state.get("authenticated"):
         show_login_page(auth_url, api_key)
         st.stop()
 
@@ -103,7 +109,6 @@ def show_login_page(auth_url, api_key):
     st.subheader("Please sign in to continue")
 
     # Best Practice: Read the site URL from secrets for better configuration.
-    # Fallback to localhost for local development if the secret is not set.
     prod_site_url = st.secrets.get("supabase", {}).get("site_url")
     if str(st.secrets.get("is_prod")).lower() == 'true' and not prod_site_url:
         st.error("Configuration Error: `site_url` is missing from `[supabase]` secrets.")
@@ -181,7 +186,11 @@ def show_login_page(auth_url, api_key):
     st.caption("OneTrack uses Supabase Secure Authentication.")
 
 def logout():
+    """Adds a logout button to the sidebar and handles session clearing."""
     if st.session_state.get("authenticated"):
         if st.sidebar.button("🚪 Logout"):
-            st.session_state.clear()
+            # Clear all session state keys except for ones you might want to preserve
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            # Force a rerun to bring the user back to the login page
             st.rerun()
