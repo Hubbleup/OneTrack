@@ -11,6 +11,7 @@ import plotly.express as px
 import pytesseract
 import logging
 import sys
+import os
 import urllib.parse
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -549,4 +550,4 @@ with tab_categories:
             st.rerun()
 
     except Exception as e:
-        st.error(f"Could not load category mappings: {e}" 
+        st.error(f"Could not load category mappings: {e}")
