@@ -63,14 +63,17 @@ def exchange_code_for_session(auth_url, api_key, auth_code):
         st.session_state.pop("code_verifier", None) # Clear verifier on failure
         return False
 
+def is_production_env():
+    """A single, robust function to determine if the app is in production."""
+    # It checks the root level first, then falls back to checking inside the [supabase] section.
+    is_prod_flag = st.secrets.get("is_prod", st.secrets.get("supabase", {}).get("is_prod"))
+    return str(is_prod_flag).lower() == 'true'
+
 def check_auth():
     """Centralized function to verify authentication state on every page."""
     # --- LOCAL DEVELOPMENT BYPASS ---
-    # More robust check for the 'is_prod' flag.
-    # It checks the root level first, then falls back to checking inside the [supabase] section.
-    is_prod_flag = st.secrets.get("is_prod", st.secrets.get("supabase", {}).get("is_prod"))
-
-    if str(is_prod_flag).lower() != 'true':
+    # Use the single, robust function to check the environment.
+    if not is_production_env():
         if "authenticated" not in st.session_state:
             print("Auth: Running in LOCAL DEVELOPMENT mode. Bypassing login.")
             st.session_state["authenticated"] = True
@@ -114,10 +117,10 @@ def show_login_page(auth_url, api_key):
 
     # Best Practice: Read the site URL from secrets for better configuration.
     prod_site_url = st.secrets.get("supabase", {}).get("site_url")
-    if str(st.secrets.get("is_prod")).lower() == 'true' and not prod_site_url:
+    if is_production_env() and not prod_site_url:
         st.error("Configuration Error: `site_url` is missing from `[supabase]` secrets.")
         st.stop()
-    redirect_target = prod_site_url if str(st.secrets.get("is_prod")).lower() == 'true' else "http://localhost:8501/"
+    redirect_target = prod_site_url if is_production_env() else "http://localhost:8501/" # Use the single, robust function
 
     tab1, tab2 = st.tabs(["📧 Email OTP", "🌐 Google Auth"])
 
